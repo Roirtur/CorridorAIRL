@@ -88,7 +88,7 @@ def evaluate(n_games: int = 50, render: bool = False):
 
 if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
-    play_game(Corridor(), RandomAgent(), RandomAgent(), render=True)
+    play_game(Corridor(), RandomAgent(), GreedyPathAgent(), render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

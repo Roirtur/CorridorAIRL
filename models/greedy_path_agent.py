@@ -1,7 +1,7 @@
 import random
 from typing import Dict, Tuple
 from corridor import Corridor, Action
-from base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 # Optionnel : exemple d'agent très simple basé sur une heuristique
 class GreedyPathAgent(BaseAgent):

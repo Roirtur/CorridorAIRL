@@ -1,7 +1,7 @@
 import random
 from typing import Dict
 from corridor import Corridor, Action
-from base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 class RandomAgent(BaseAgent):
     """Agent aléatoire : choisit uniformément une action légale."""

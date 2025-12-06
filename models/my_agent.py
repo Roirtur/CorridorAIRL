@@ -1,7 +1,7 @@
 from corridor import Corridor, Action
 from typing import Dict
 import random
-from base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 class MyAgent(BaseAgent):
     """Interface minimale : implémente select_action(env, obs)."""

@@ -152,15 +152,23 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         
     return 0
 
-def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, save_path: Optional[str] = None):
+def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, save_path: Optional[str] = None, start_epsilon: float = 1.0, end_epsilon: float = 0.1, alpha: float = 0.1, gamma: float = 0.995, epsilon_decay: Optional[float] = None):
     """
     Generic training loop.
     """
     print(f"Starting training for {episodes} episodes against {adversary.name}...")
     
-    start_epsilon = agent.epsilon
-    end_epsilon = 0.1
-    epsilon_decay = (start_epsilon - end_epsilon) / episodes
+    # Reset/Set hyperparameters
+    agent.epsilon = start_epsilon
+    if hasattr(agent, 'alpha'):
+        agent.alpha = alpha
+    if hasattr(agent, 'gamma'):
+        agent.gamma = gamma
+        
+    # Calculate linear decay step if no multiplicative decay is provided
+    linear_decay_step = 0
+    if epsilon_decay is None:
+        linear_decay_step = (start_epsilon - end_epsilon) / episodes
     
     wins = 0
     
@@ -169,8 +177,12 @@ def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, s
         wins += win
         
         # Decay epsilon
-        if agent.epsilon > end_epsilon:
-            agent.epsilon -= epsilon_decay
+        if epsilon_decay is not None:
+            # Multiplicative decay
+            agent.epsilon = max(end_epsilon, agent.epsilon * epsilon_decay)
+        elif agent.epsilon > end_epsilon:
+            # Linear decay
+            agent.epsilon -= linear_decay_step
             
         agent.episodes_trained += 1
         

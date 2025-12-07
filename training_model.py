@@ -4,17 +4,45 @@ from models import SarsaAgent, GreedyPathAgent, RandomAgent
 from models.rl_utils import generate_save_path
 import os
 
+# Define available models to train
+MODELS = {
+    'sarsa': SarsaAgent
+}
+
+# Define available adversaries (factories to create fresh instances)
+ADVERSARIES = {
+    "greedy": lambda: GreedyPathAgent(name="Greedy", wall_prob=0.1),
+    "random": lambda: RandomAgent(name="Random"),
+    "sarsa": lambda: SarsaAgent(name="Sarsa_Adv", epsilon=0.1, training_mode=False)
+}
+
 def main():
     parser = argparse.ArgumentParser(description="Train RL Agent for Corridor")
-    parser.add_argument("--model", type=str, default="sarsa", choices=["sarsa"], help="Model to train")
-    parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes")
+    parser.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()), help="Model to train")
+    parser.add_argument("--episodes", type=int, default=10000, help="Number of episodes")
     parser.add_argument("--board_size", type=int, default=9, help="Board size (N)")
     parser.add_argument("--walls", type=int, default=10, help="Walls per player (standard 10 for 9x9)")
-    parser.add_argument("--adversary", nargs='+', default=["greedy", "random"], help="Adversary type(s)")
+    parser.add_argument("--adversary", nargs='+', default=["random", "greedy"], help="Adversary type(s)")
+    parser.add_argument("--load_adversary", nargs='+', help="Load adversary models: name=path")
     parser.add_argument("--save_path", type=str, default=None, help="Path to save model")
+    parser.add_argument("--alpha", type=float, default=0.1, help="Learning rate")
+    parser.add_argument("--epsilon", type=float, default=1.0, help="Starting epsilon")
+    parser.add_argument("--gamma", type=float, default=0.98, help="Discount factor")
+    parser.add_argument("--min_epsilon", type=float, default=0.1, help="Minimum epsilon")
+    parser.add_argument("--epsilon_decay", type=float, default=None, help="Epsilon decay factor (multiplicative). If not set, uses linear decay.")
     
     args = parser.parse_args()
     
+    # Parse load_adversary
+    adversary_paths = {}
+    if args.load_adversary:
+        for item in args.load_adversary:
+            if '=' in item:
+                key, val = item.split('=', 1)
+                adversary_paths[key] = val
+            else:
+                print(f"Warning: Invalid format for load_adversary '{item}'. Expected name=path.")
+
     # Generate default save path if not provided
     if args.save_path is None:
         # Create a descriptive name based on adversaries
@@ -33,45 +61,48 @@ def main():
     env = Corridor(N=args.board_size, walls_per_player=args.walls)
     
     # Setup Agent
-    if args.model == "sarsa":
-        agent = SarsaAgent(
-            name="Sarsa", 
-            alpha=0.1, 
-            gamma=0.995, 
-            epsilon=1.0, # Start with full exploration
-            training_mode=True
-        )
+    agent_cls = MODELS[args.model]
+    agent = agent_cls(
+        name=args.model.capitalize(),
+        alpha=args.alpha, 
+        gamma=args.gamma, 
+        epsilon=args.epsilon, # Start with full exploration
+        training_mode=True
+    )
         
-        if os.path.exists(args.save_path):
-            print(f"Loading existing model from {args.save_path}...")
-            agent.load(args.save_path)
-            
-        # Curriculum Training
-        adversaries_list = list(args.adversary)
-        if "self" not in adversaries_list:
-            adversaries_list.append("self")
-            
-        # Distribute episodes among phases
-        episodes_per_phase = args.episodes // len(adversaries_list)
+    if os.path.exists(args.save_path):
+        print(f"Loading existing model from {args.save_path}...")
+        agent.load(args.save_path)
         
-        for i, adv_name in enumerate(adversaries_list):
-            print(f"\n=== Phase {i+1}: Training against {adv_name.capitalize()} ===")
+    # Curriculum Training
+    adversaries_list = list(args.adversary)
+    if "self" not in adversaries_list:
+        adversaries_list.append("self")
+        
+    for i, adv_name in enumerate(adversaries_list):
+        print(f"\n=== Phase {i+1}: Training against {adv_name.capitalize()} ===")
+        
+        if adv_name == "self":
+            adversary = agent # Self-play
+        elif adv_name in ADVERSARIES:
+            adversary = ADVERSARIES[adv_name]()
+            # Load pretrained model if specified
+            if adv_name in adversary_paths:
+                print(f"Loading {adv_name} from {adversary_paths[adv_name]}")
+                if hasattr(adversary, 'load'):
+                    adversary.load(adversary_paths[adv_name])
+                else:
+                    print(f"Warning: Adversary {adv_name} does not support loading.")
+        else:
+            print(f"Unknown adversary: {adv_name}, skipping.")
+            continue
             
-            if adv_name == "greedy":
-                adversary = GreedyPathAgent(name="Greedy", wall_prob=0.1)
-            elif adv_name == "random":
-                adversary = RandomAgent(name="Random")
-            elif adv_name == "self":
-                adversary = agent # Self-play
-                # Boost exploration slightly for self-play if it was decayed too much?
-                # Or just let it continue decaying?
-                # Let's ensure at least some exploration
-                agent.epsilon = max(agent.epsilon, 0.2)
-            else:
-                print(f"Unknown adversary: {adv_name}, skipping.")
-                continue
-                
-            agent.train(env, adversary, episodes_per_phase, args.save_path)
+        agent.train(env, adversary, args.episodes, args.save_path, 
+                    start_epsilon=args.epsilon, 
+                    end_epsilon=args.min_epsilon, 
+                    alpha=args.alpha,
+                    gamma=args.gamma,
+                    epsilon_decay=args.epsilon_decay)
 
 if __name__ == "__main__":
     main()

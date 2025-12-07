@@ -49,7 +49,7 @@ def play_game(env: Corridor, agent1: BaseAgent, agent2: BaseAgent, render: bool 
 
 
 def evaluate(n_games: int = 50, render: bool = False):
-    env = Corridor(N=5)
+    env = Corridor(N=9)
     # env = Corridor(N=9, walls_per_player=10)
 
     # Remplace RandomAgent par votre agent :
@@ -90,15 +90,12 @@ def evaluate(n_games: int = 50, render: bool = False):
 if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
     # Try to load trained model if available
-    model_path = "saved_models/sarsa_model.pkl"
-    
-    # If model doesn't exist, it will just print a warning and play with random weights (bad)
-    # But SarsaAgent handles missing file gracefully in load() by printing, 
-    # though here we pass it to init.
+    # We look for the curriculum trained model on 5x5 board
+    model_path = "saved_models/sarsa_N5_E5000_vs_Curriculum.pkl"
     
     agent = SarsaAgent(training_mode=False, load_path=model_path)
     
-    play_game(Corridor(N=5), agent, GreedyPathAgent(), render=True)
+    play_game(Corridor(N=9), agent, GreedyPathAgent(), render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

@@ -7,7 +7,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train RL Agent for Corridor")
     parser.add_argument("--model", type=str, default="sarsa", choices=["sarsa"], help="Model to train")
     parser.add_argument("--episodes", type=int, default=5000, help="Number of episodes")
-    parser.add_argument("--board_size", type=int, default=5, help="Board size (N)")
+    parser.add_argument("--board_size", type=int, default=9, help="Board size (N)")
     parser.add_argument("--walls", type=int, default=6, help="Walls per player (reduced for 7x7)")
     parser.add_argument("--adversary", type=str, default="greedy", choices=["greedy", "random"], help="Adversary type")
     parser.add_argument("--save_path", type=str, default="saved_models/sarsa_model.pkl", help="Path to save model")

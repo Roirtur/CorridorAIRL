@@ -81,15 +81,4 @@ class SarsaAgent(BaseAgent):
             
         self.q_table[(state, action)] += self.alpha * (target - current_q)
 
-    def train(self, env: Corridor, adversary: BaseAgent, num_episodes: int, save_path: Optional[str] = None):
-        """
-        Train the agent against an adversary using the shared training loop.
-        """
-        train_loop(self, env, adversary, num_episodes, save_path)
-
-    def save(self, path: str, env: Corridor, adversary: BaseAgent):
-        save_model(self, path, env, adversary.name, self.episodes_trained)
-
-    def load(self, path: str):
-        load_model(self, path)
         

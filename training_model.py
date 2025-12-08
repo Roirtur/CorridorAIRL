@@ -79,9 +79,9 @@ def main():
     if "self" not in adversaries_list:
         adversaries_list.append("self")
         
+    active_adversaries = []
+    
     for i, adv_name in enumerate(adversaries_list):
-        print(f"\n=== Phase {i+1}: Training against {adv_name.capitalize()} ===")
-        
         if adv_name == "self":
             adversary = agent # Self-play
         elif adv_name in ADVERSARIES:
@@ -97,12 +97,19 @@ def main():
             print(f"Unknown adversary: {adv_name}, skipping.")
             continue
             
-        agent.train(env, adversary, args.episodes, args.save_path, 
-                    start_epsilon=args.epsilon, 
-                    end_epsilon=args.min_epsilon, 
-                    alpha=args.alpha,
-                    gamma=args.gamma,
-                    epsilon_decay=args.epsilon_decay)
+        active_adversaries.append(adversary)
+        
+    if not active_adversaries:
+        print("No valid adversaries found. Exiting.")
+        return
+
+    print(f"\n=== Training against: {', '.join([adv.name for adv in active_adversaries])} ===")
+    agent.train(env, active_adversaries, args.episodes, args.save_path, 
+                start_epsilon=args.epsilon, 
+                end_epsilon=args.min_epsilon, 
+                alpha=args.alpha,
+                gamma=args.gamma,
+                epsilon_decay=args.epsilon_decay)
 
 if __name__ == "__main__":
     main()

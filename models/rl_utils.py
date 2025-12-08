@@ -1,7 +1,7 @@
 import os
 import pickle
 import random
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Union
 from corridor import Corridor, Action
 from .base_agent import BaseAgent
 
@@ -152,11 +152,15 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         
     return 0
 
-def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, save_path: Optional[str] = None, start_epsilon: float = 1.0, end_epsilon: float = 0.1, alpha: float = 0.1, gamma: float = 0.995, epsilon_decay: Optional[float] = None):
+def train_loop(agent: Any, env: Corridor, adversaries: Union[List[BaseAgent], BaseAgent], episodes: int, save_path: Optional[str] = None, start_epsilon: float = 1.0, end_epsilon: float = 0.1, alpha: float = 0.1, gamma: float = 0.995, epsilon_decay: Optional[float] = None):
     """
     Generic training loop.
     """
-    print(f"Starting training for {episodes} episodes against {adversary.name}...")
+    if not isinstance(adversaries, list):
+        adversaries = [adversaries]
+        
+    adversary_names = ", ".join([adv.name for adv in adversaries])
+    print(f"Starting training for {episodes} episodes against {adversary_names}...")
     
     # Reset/Set hyperparameters
     agent.epsilon = start_epsilon
@@ -173,6 +177,7 @@ def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, s
     wins = 0
     
     for episode in range(1, episodes + 1):
+        adversary = random.choice(adversaries)
         win = run_episode(env, agent, adversary, training=True)
         wins += win
         
@@ -191,4 +196,4 @@ def train_loop(agent: Any, env: Corridor, adversary: BaseAgent, episodes: int, s
             wins = 0
             
     if save_path:
-        save_model(agent, save_path, env, adversary.name, agent.episodes_trained)
+        save_model(agent, save_path, env, adversary_names, agent.episodes_trained)

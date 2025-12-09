@@ -40,10 +40,32 @@ def get_canonical_state(obs: Dict, env: Corridor) -> tuple:
         my_pos = (my_pos[0], N - 1 - my_pos[1])
         opp_pos = (opp_pos[0], N - 1 - opp_pos[1])
     
-    # State: (my_pos, opp_pos, has_walls)
-    # This is a compact representation that worked well for 5x5.
-    # For 9x9, it might need more details (like distances), but let's start here.
-    return (my_pos, opp_pos, my_walls > 0)
+    # 3. Local Wall/Boundary Awareness
+    # Check valid moves in the *canonical* perspective
+    # We do this by checking real moves and transforming them
+    
+    real_p = obs['p1'] if player == 1 else obs['p2']
+    r, c = real_p
+    
+    # Real directions: N(-1,0), S(1,0), W(0,-1), E(0,1)
+    # We use env._can_step to check walls and boundaries
+    can_n = env._can_step(real_p, (r-1, c))
+    can_s = env._can_step(real_p, (r+1, c))
+    can_w = env._can_step(real_p, (r, c-1))
+    can_e = env._can_step(real_p, (r, c+1))
+    
+    # Transform to canonical perspective
+    if player == 2:
+        # Vertical flip: North <-> South
+        can_n, can_s = can_s, can_n
+        
+    if should_flip:
+        # Horizontal flip: West <-> East
+        can_w, can_e = can_e, can_w
+        
+    valid_mask = (can_n, can_s, can_w, can_e)
+    
+    return (my_pos, opp_pos, my_walls > 0, valid_mask)
 
 def get_shaped_reward(env: Corridor, my_id: int) -> float:
     """

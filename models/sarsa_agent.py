@@ -4,7 +4,7 @@ import random
 from .base_agent import BaseAgent
 import numpy as np
 from collections import defaultdict
-from .rl_utils import get_canonical_state, train_loop, save_model, load_model
+from .rl_utils import get_canonical_state
 
 class SarsaAgent(BaseAgent):
     """Sarsa Agent"""

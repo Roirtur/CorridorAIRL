@@ -49,7 +49,8 @@ def play_game(env: Corridor, agent1: BaseAgent, agent2: BaseAgent, render: bool 
 
 
 def evaluate(n_games: int = 50, render: bool = False):
-    env = Corridor(N=9, walls_per_player=10)
+    env = Corridor(N=5)
+    # env = Corridor(N=9, walls_per_player=10)
 
     # Remplace RandomAgent par votre agent :
     agent1 = RandomAgent(name="Random-1", seed=123)
@@ -88,7 +89,13 @@ def evaluate(n_games: int = 50, render: bool = False):
 
 if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
-    play_game(Corridor(), RandomAgent(), GreedyPathAgent(), render=True)
+    # Try to load trained model if available
+    # We look for the curriculum trained model on 5x5 board
+    model_path = "saved_models/sarsa_N5_E4000_vs_random_greedy_self.pkl"
+    
+    agent = SarsaAgent(training_mode=False, load_path=model_path)
+    
+    play_game(Corridor(N=5), agent, GreedyPathAgent(), render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

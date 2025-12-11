@@ -3,5 +3,6 @@ from .greedy_path_agent import GreedyPathAgent
 from .random_agent import RandomAgent
 from .my_agent import MyAgent
 from .sarsa_agent import SarsaAgent
+from .qlearning_agent import QlearningAgent
 
-__all__ = ['BaseAgent', 'GreedyPathAgent', 'RandomAgent', 'MyAgent', 'SarsaAgent']
+__all__ = ['BaseAgent', 'GreedyPathAgent', 'RandomAgent', 'MyAgent', 'SarsaAgent', 'QlearningAgent']

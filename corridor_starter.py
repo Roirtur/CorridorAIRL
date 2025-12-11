@@ -91,11 +91,12 @@ if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
     # Try to load trained model if available
     # We look for the curriculum trained model on 5x5 board
-    model_path = "saved_models/sarsa_N5_E4000_vs_random_greedy_self.pkl"
+    sarsa_path = "saved_models/sarsa_N4_E10000_vs_random_greedy_self.pkl"
+    qlearn_path = "saved_models/qlearn_N4_E10000_vs_random_greedy_self.pkl"
     
-    agent = SarsaAgent(training_mode=False, load_path=model_path)
-    
-    play_game(Corridor(N=5), agent, GreedyPathAgent(), render=True)
+    agent1 = SarsaAgent(training_mode=False, load_path= sarsa_path)
+    agent2 = QlearningAgent(training_mode=False, load_path= qlearn_path)
+    play_game(Corridor(N=9), agent1, agent2, render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

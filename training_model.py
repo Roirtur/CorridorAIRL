@@ -114,7 +114,7 @@ def main():
     agent = agent_cls(**kwargs)
     
     if not args.save_path:
-        args.save_path = f"saved_models/{args.model}_professional_N{args.board_size}.pkl"
+        args.save_path = f"saved_models/{args.model}_E{args.episodes}_N{args.board_size}.pkl"
         
     train(agent, env, args.episodes, args.save_path)
 

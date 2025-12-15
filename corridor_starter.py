@@ -91,9 +91,9 @@ if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
     # Try to load trained model if available
     # We look for the curriculum trained model on 5x5 board
-    model_path = "saved_models/dqn_N5_E5000_vs_random_greedy_self.pkl"
+    model_path = "saved_models/qlearn_professional_N5.pkl"
     
-    agent = DQNAgent(training_mode=False, load_path=model_path)
+    agent = QlearningAgent(training_mode=False, load_path=model_path)
     
     play_game(Corridor(N=5), agent, GreedyPathAgent(), render=True)
 

@@ -84,8 +84,10 @@ def generate_save_path(base_dir: str, model_name: str, board_size: int, episodes
 
 def save_model(agent: Any, path: str, env: Corridor, adversary_name: str, episodes: int):
     """Saves the agent model and metadata."""
+    from models.dqn_agent import DQNAgent
+    import torch
+    
     data = {
-        "q_table": dict(agent.q_table),
         "episodes": episodes,
         "board_size": env.N,
         "walls": env.walls_per_player,
@@ -94,6 +96,18 @@ def save_model(agent: Any, path: str, env: Corridor, adversary_name: str, episod
         "alpha": agent.alpha,
         "gamma": agent.gamma
     }
+    
+    # Handle DQN agent differently (save neural network weights)
+    if isinstance(agent, DQNAgent):
+        data["agent_type"] = "DQN"
+        data["q_network_state"] = agent.q_network.state_dict()
+        data["target_network_state"] = agent.target_network.state_dict()
+        data["optimizer_state"] = agent.optimizer.state_dict()
+    else:
+        # Q-learning agents (SARSA, etc.)
+        data["agent_type"] = "Q-Learning"
+        data["q_table"] = dict(agent.q_table)
+    
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         pickle.dump(data, f)
@@ -101,18 +115,26 @@ def save_model(agent: Any, path: str, env: Corridor, adversary_name: str, episod
 
 def load_model(agent: Any, path: str):
     """Loads the agent model and metadata."""
+    from models.dqn_agent import DQNAgent
+    import torch
+    
     if not os.path.exists(path):
         print(f"Warning: Model file {path} not found. Starting with empty model.")
         return
         
     with open(path, "rb") as f:
         data = pickle.load(f)
-        
-    agent.q_table.update(data.get("q_table", {}))
+    
+    agent_type = data.get("agent_type", "Q-Learning")
+    
+    if agent_type == "DQN" and isinstance(agent, DQNAgent):
+        agent.q_network.load_state_dict(data["q_network_state"])
+        agent.target_network.load_state_dict(data["target_network_state"])
+        agent.optimizer.load_state_dict(data["optimizer_state"])
+    elif agent_type == "Q-Learning":
+        agent.q_table.update(data.get("q_table", {}))
+    
     agent.episodes_trained = data.get("episodes", 0)
-    # We don't overwrite epsilon/alpha/gamma from file to allow tuning, 
-    # unless we want to resume exactly. Let's keep current config but warn?
-    # Actually, usually we want to load the Q-table.
     
     print(f"Model loaded from {path}")
     print(f"  Episodes: {data.get('episodes')}")
@@ -135,7 +157,18 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         obs, _, done, info = env.step(opp_action)
         if done: return 0 # Opponent won immediately (unlikely)
 
-    state = get_canonical_state(obs, env)
+    # Check if agent is DQN (uses raw obs) or Q-learning (uses canonical state)
+    from models.dqn_agent import DQNAgent
+    is_dqn = isinstance(agent, DQNAgent)
+    
+    if is_dqn:
+        from models.dqn_agent import state_to_features
+        state = state_to_features(obs, env.N)
+        state_obs = obs  # Keep observation for DQN
+    else:
+        state = get_canonical_state(obs, env)
+        state_obs = None
+    
     action = agent.select_action(env, obs)
     
     phi_s = get_shaped_reward(env, my_id)
@@ -147,7 +180,10 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         
         if done:
             if training:
-                agent.update(state, action, 1.0, None, None, True)
+                if is_dqn:
+                    agent.update(state, action, 1.0, None, None, True, env=None, next_obs=None)
+                else:
+                    agent.update(state, action, 1.0, None, None, True)
             return 1
         
         # 2. Opponent's turn
@@ -156,17 +192,30 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         
         if done:
             if training:
-                agent.update(state, action, -1.0, None, None, True)
+                if is_dqn:
+                    agent.update(state, action, -1.0, None, None, True, env=None, next_obs=None)
+                else:
+                    agent.update(state, action, -1.0, None, None, True)
             return 0
         
         # 3. Prepare next step
-        next_state = get_canonical_state(obs, env)
+        if is_dqn:
+            next_state = state_to_features(obs, env.N)
+            next_obs = obs
+        else:
+            next_state = get_canonical_state(obs, env)
+            next_obs = None
+            
         next_action = agent.select_action(env, obs)
         
         if training:
             phi_next_s = get_shaped_reward(env, my_id)
             shaped_reward = 0.0 + agent.gamma * phi_next_s - phi_s
-            agent.update(state, action, shaped_reward, next_state, next_action, False)
+            
+            if is_dqn:
+                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_obs=next_obs)
+            else:
+                agent.update(state, action, shaped_reward, next_state, next_action, False)
             phi_s = phi_next_s
         
         state = next_state

@@ -1,12 +1,13 @@
 import argparse
 from corridor import Corridor
-from models import SarsaAgent, GreedyPathAgent, RandomAgent
+from models import SarsaAgent, GreedyPathAgent, RandomAgent, DQNAgent
 from models.rl_utils import generate_save_path
 import os
 
 # Define available models to train
 MODELS = {
-    'sarsa': SarsaAgent
+    'sarsa': SarsaAgent,
+    'dqn': DQNAgent
 }
 
 # Define available adversaries (factories to create fresh instances)
@@ -67,7 +68,8 @@ def main():
         alpha=args.alpha, 
         gamma=args.gamma, 
         epsilon=args.epsilon, # Start with full exploration
-        training_mode=True
+        training_mode=True,
+        board_size=args.board_size
     )
         
     if os.path.exists(args.save_path):

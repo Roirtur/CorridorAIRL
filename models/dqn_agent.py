@@ -113,17 +113,15 @@ def action_to_features(action: Action, obs: Dict, board_size: int) -> np.ndarray
 class DQN(nn.Module):
     """
     DQN that takes state + action as input and outputs Q-value.
+    Optimized for speed with smaller architecture.
     """
     def __init__(self, state_dim, action_dim):
         super(DQN, self).__init__()
         input_dim = state_dim + action_dim
-        self.layer1 = nn.Linear(input_dim, 512)
-        self.layer2 = nn.Linear(512, 512)
-        self.layer3 = nn.Linear(512, 256)
-        self.layer4 = nn.Linear(256, 128)
-        self.layer5 = nn.Linear(128, 1)
+        self.layer1 = nn.Linear(input_dim, 128)
+        self.layer2 = nn.Linear(128, 64)
+        self.layer3 = nn.Linear(64, 1)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.1)
 
     def forward(self, state, action):
         """
@@ -133,12 +131,8 @@ class DQN(nn.Module):
         """
         x = torch.cat([state, action], dim=1)
         x = self.relu(self.layer1(x))
-        x = self.dropout(x)
         x = self.relu(self.layer2(x))
-        x = self.dropout(x)
-        x = self.relu(self.layer3(x))
-        x = self.relu(self.layer4(x))
-        x = self.layer5(x)
+        x = self.layer3(x)
         return x.squeeze(1)
 
 
@@ -146,9 +140,9 @@ class ReplayBuffer:
     def __init__(self, capacity=10000):
         self.queue = deque(maxlen=capacity)
 
-    def push(self, state, action_features, reward, next_state, next_obs, done):
-        """Store experience including next observation for legal action computation."""
-        self.queue.append((state, action_features, reward, next_state, next_obs, done))
+    def push(self, state, action_features, reward, next_state, next_obs, done, next_legal_actions=None):
+        """Store experience including next observation and legal actions for proper target computation."""
+        self.queue.append((state, action_features, reward, next_state, next_obs, done, next_legal_actions))
 
     def sample(self, batch_size):
         return random.sample(self.queue, batch_size)
@@ -163,14 +157,15 @@ class DQNAgent(BaseAgent):
         self,
         name: str = "DQN",
         seed: int | None = None,
-        alpha: float = 0.0001,      # Lower learning rate
+        alpha: float = 0.0003,      # Slightly higher for faster learning
         gamma: float = 0.995,       # Higher discount for long-term planning
         epsilon: float = 1.0,       # Start with full exploration
         training_mode: bool = True,
         load_path: Optional[str] = None,
-        buffer_size=20000,          # Larger buffer
-        batch_size=128,             # Larger batch
-        target_update_freq=500,     # Less frequent updates
+        buffer_size=10000,          # Sufficient buffer
+        batch_size=64,              # Smaller batch for faster updates
+        target_update_freq=200,     # More frequent target updates
+        update_frequency=8,         # Train every N steps (optimized)
         board_size: int = 9,
     ):
         super().__init__(name=name, seed=seed)
@@ -184,15 +179,20 @@ class DQNAgent(BaseAgent):
 
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
+        self.update_frequency = update_frequency
         self.learn_step = 0
+        self.step_count = 0  # Track total steps
         self.board_size = board_size
+
+        # Device selection
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Updated dimensions
         self.state_dim = 12  # From improved state_to_features
         self.action_dim = 7  # From improved action_to_features
 
-        self.q_network = DQN(self.state_dim, self.action_dim)
-        self.target_network = DQN(self.state_dim, self.action_dim)
+        self.q_network = DQN(self.state_dim, self.action_dim).to(self.device)
+        self.target_network = DQN(self.state_dim, self.action_dim).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
 
@@ -203,6 +203,29 @@ class DQNAgent(BaseAgent):
 
         if load_path:
             pass  # TODO: implement loading
+
+    def _evaluate_actions_batch(self, state_features: np.ndarray, legal_actions: List[Action], obs: Dict, network=None) -> Tuple[List[float], Action]:
+        """Efficiently evaluate all legal actions in batch."""
+        if network is None:
+            network = self.q_network
+            
+        # Prepare batch
+        state_batch = []
+        action_batch = []
+        
+        for action in legal_actions:
+            action_features = action_to_features(action, obs, self.board_size)
+            state_batch.append(state_features)
+            action_batch.append(action_features)
+        
+        state_tensor = torch.FloatTensor(np.array(state_batch)).to(self.device)
+        action_tensor = torch.FloatTensor(np.array(action_batch)).to(self.device)
+        
+        with torch.no_grad():
+            q_values = network(state_tensor, action_tensor).cpu().numpy()
+        
+        best_idx = np.argmax(q_values)
+        return q_values, legal_actions[best_idx]
 
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         legal_actions = env.legal_actions()
@@ -215,39 +238,32 @@ class DQNAgent(BaseAgent):
             
         # Get state features
         state_features = state_to_features(obs, self.board_size)
-        state_tensor = torch.FloatTensor(state_features).unsqueeze(0)
-
-        # Evaluate all legal actions
-        best_action = None
-        best_q = float('-inf')
         
-        with torch.no_grad():
-            for action in legal_actions:
-                action_features = action_to_features(action, obs, self.board_size)
-                action_tensor = torch.FloatTensor(action_features).unsqueeze(0)
-                q_value = self.q_network(state_tensor, action_tensor).item()
-                
-                if q_value > best_q:
-                    best_q = q_value
-                    best_action = action
+        # Batch evaluate all legal actions
+        _, best_action = self._evaluate_actions_batch(state_features, legal_actions, obs)
         
         return best_action
 
-    def update(self, state, action, reward, next_state, next_action, done, env=None, next_obs=None):
+    def update(self, state, action, reward, next_state, next_action, done, env=None, next_obs=None, obs=None, next_legal_actions=None):
         # Convert state tuple to features if needed
         if isinstance(state, tuple):
             return
         
-        # Get action features
-        # We need the observation for action features, but we don't have it in state
-        # Use a dummy obs for now - this is a limitation of current architecture
-        dummy_obs = {'to_play': 1, 'p1': (0, 0), 'p2': (0, 0)}
-        action_features = action_to_features(action, dummy_obs, self.board_size)
+        # Get action features using proper observation
+        if obs is None:
+            # Fallback: reconstruct basic obs from state (not ideal but works)
+            obs = {'to_play': 1, 'p1': (int(state[0] * self.board_size), int(state[1] * self.board_size)), 
+                   'p2': (int(state[2] * self.board_size), int(state[3] * self.board_size))}
         
-        # Store experience with next observation
-        self.buffer.push(state, action_features, reward, next_state, next_obs, done)
+        action_features = action_to_features(action, obs, self.board_size)
+        
+        # Store experience with next observation and legal actions
+        self.buffer.push(state, action_features, reward, next_state, next_obs, done, next_legal_actions)
+        
+        self.step_count += 1
 
-        if len(self.buffer) < self.batch_size:
+        # Only train every update_frequency steps
+        if len(self.buffer) < self.batch_size or self.step_count % self.update_frequency != 0:
             return
         
         batches = self.buffer.sample(self.batch_size)
@@ -259,12 +275,13 @@ class DQNAgent(BaseAgent):
         next_states = np.array([batch[3] if batch[3] is not None else batch[0] for batch in batches], dtype=np.float32)
         next_obs_list = [batch[4] for batch in batches]
         dones = np.array([batch[5] for batch in batches], dtype=np.float32)
+        next_legal_actions_list = [batch[6] if len(batch) > 6 else None for batch in batches]
         
-        states = torch.FloatTensor(states)
-        action_features = torch.FloatTensor(action_features)
-        rewards = torch.FloatTensor(rewards)
-        next_states = torch.FloatTensor(next_states)
-        dones = torch.FloatTensor(dones)
+        states = torch.FloatTensor(states).to(self.device)
+        action_features = torch.FloatTensor(action_features).to(self.device)
+        rewards = torch.FloatTensor(rewards).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
+        dones = torch.FloatTensor(dones).to(self.device)
 
         # Current Q-values
         q_values = self.q_network(states, action_features)
@@ -277,32 +294,24 @@ class DQNAgent(BaseAgent):
                     # Terminal state
                     next_q_values.append(0.0)
                 else:
-                    # Create a temporary env to get legal actions
-                    # This is expensive but necessary for proper Q-learning
-                    # For efficiency, we approximate with a few random actions
-                    max_q = float('-inf')
-                    # Sample some actions to approximate max
-                    for _ in range(5):  # Sample 5 actions
-                        # Create random action features
-                        is_move = np.random.random() < 0.7  # Prefer moves
-                        if is_move:
-                            rand_action = action_to_features(
-                                ("M", (np.random.randint(self.board_size), np.random.randint(self.board_size))),
-                                dummy_obs, self.board_size
-                            )
-                        else:
-                            rand_action = action_to_features(
-                                ("W", (np.random.randint(self.board_size-1), np.random.randint(self.board_size-1), "H" if np.random.random() < 0.5 else "V")),
-                                dummy_obs, self.board_size
-                            )
-                        
-                        rand_action_tensor = torch.FloatTensor(rand_action).unsqueeze(0)
-                        q = self.target_network(next_states[i].unsqueeze(0), rand_action_tensor).item()
-                        max_q = max(max_q, q)
+                    # Use stored legal actions if available
+                    next_legal_actions = next_legal_actions_list[i]
+                    if next_legal_actions and len(next_legal_actions) > 0:
+                        # Batch evaluate legal actions for this next state
+                        q_vals, _ = self._evaluate_actions_batch(
+                            next_states[i].cpu().numpy(), 
+                            next_legal_actions, 
+                            next_obs,
+                            network=self.target_network
+                        )
+                        max_q = np.max(q_vals)
+                    else:
+                        # Fallback: estimate with 0 (conservative)
+                        max_q = 0.0
                     
                     next_q_values.append(max_q)
             
-            next_q_values = torch.FloatTensor(next_q_values)
+            next_q_values = torch.FloatTensor(next_q_values).to(self.device)
             target = rewards + self.gamma * next_q_values * (1 - dones)
         
         loss = self.loss_fn(q_values, target)

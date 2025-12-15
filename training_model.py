@@ -151,14 +151,21 @@ def main():
     
     # Setup Agent
     agent_cls = MODELS[args.model]
-    agent = agent_cls(
-        name=args.model.capitalize(),
-        alpha=args.alpha, 
-        gamma=args.gamma, 
-        epsilon=args.epsilon, # Start with full exploration
-        training_mode=True,
-        board_size=args.board_size
-    )
+    
+    # Prepare agent kwargs - only DQN needs board_size
+    agent_kwargs = {
+        'name': args.model.capitalize(),
+        'alpha': args.alpha, 
+        'gamma': args.gamma, 
+        'epsilon': args.epsilon,
+        'training_mode': True,
+    }
+    
+    # Add board_size only for DQN
+    if args.model == 'dqn':
+        agent_kwargs['board_size'] = args.board_size
+    
+    agent = agent_cls(**agent_kwargs)
         
     if os.path.exists(args.save_path):
         print(f"Loading existing model from {args.save_path}...")

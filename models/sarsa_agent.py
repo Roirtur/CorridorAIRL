@@ -67,7 +67,7 @@ class SarsaAgent(BaseAgent):
             
         return random.choice(best_actions)
 
-    def update(self, state, action, reward, next_state, next_action, done):
+    def update(self, state, action, reward, next_state, next_action, done, env=None, next_legal_actions=None):
         """
         SARSA update: Q(S, A) <- Q(S, A) + alpha * [R + gamma * Q(S', A') - Q(S, A)]
         """

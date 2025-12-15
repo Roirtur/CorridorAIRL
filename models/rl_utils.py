@@ -176,14 +176,15 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
     done = False
     while not done:
         # 1. Execute our action
+        prev_obs = obs  # Store for DQN
         obs, reward, done, info = env.step(action)
         
         if done:
             if training:
                 if is_dqn:
-                    agent.update(state, action, 1.0, None, None, True, env=None, next_obs=None)
+                    agent.update(state, action, 1.0, None, None, True, env=None, next_obs=None, obs=prev_obs, next_legal_actions=None)
                 else:
-                    agent.update(state, action, 1.0, None, None, True)
+                    agent.update(state, action, 1.0, None, None, True, env=None, next_legal_actions=None)
             return 1
         
         # 2. Opponent's turn
@@ -193,9 +194,9 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         if done:
             if training:
                 if is_dqn:
-                    agent.update(state, action, -1.0, None, None, True, env=None, next_obs=None)
+                    agent.update(state, action, -1.0, None, None, True, env=None, next_obs=None, obs=prev_obs, next_legal_actions=None)
                 else:
-                    agent.update(state, action, -1.0, None, None, True)
+                    agent.update(state, action, -1.0, None, None, True, env=None, next_legal_actions=None)
             return 0
         
         # 3. Prepare next step
@@ -205,7 +206,9 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         else:
             next_state = get_canonical_state(obs, env)
             next_obs = None
-            
+        
+        # Get legal actions for next state (needed for proper Q-learning)
+        next_legal_actions = env.legal_actions()
         next_action = agent.select_action(env, obs)
         
         if training:
@@ -213,13 +216,14 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
             shaped_reward = 0.0 + agent.gamma * phi_next_s - phi_s
             
             if is_dqn:
-                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_obs=next_obs)
+                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_obs=next_obs, obs=prev_obs, next_legal_actions=next_legal_actions)
             else:
-                agent.update(state, action, shaped_reward, next_state, next_action, False)
+                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_legal_actions=next_legal_actions)
             phi_s = phi_next_s
         
         state = next_state
         action = next_action
+        prev_obs = obs  # Update for next iteration
         
     return 0
 

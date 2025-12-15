@@ -69,17 +69,25 @@ class QlearningAgent(BaseAgent):
             
         return random.choice(best_actions)
 
-    def update(self, state, action, reward, next_state, done, *args):
+    def update(self, state, action, reward, next_state, next_action, done, env=None, next_legal_actions=None):
         """
         Q-Learning update: Q(S, A) <- Q(S, A) + alpha * [R + gamma * max_a Q(S', a') - Q(S, A)]
         Note: state and next_state are already canonical tuples from rl_utils.py
+        Note: next_action is ignored for Q-learning (used in SARSA), kept for API consistency
         """
         current_q = self.q_table[(state, action)]
         
         if done or next_state is None:
             target = reward
         else:
-            next_q_values = [self.q_table[(next_state, a)] for a in Action]
-            target = reward + self.gamma * max(next_q_values)
+            # Compute max over legal actions only
+            if next_legal_actions is None:
+                # Fallback: assume all actions are possible (suboptimal)
+                next_q_values = list(self.q_table.values()) if self.q_table else [0.0]
+                target = reward + self.gamma * max(next_q_values)
+            else:
+                # Proper Q-learning: max over legal actions
+                next_q_values = [self.q_table[(next_state, a)] for a in next_legal_actions]
+                target = reward + self.gamma * max(next_q_values) if next_q_values else reward
         
         self.q_table[(state, action)] += self.alpha * (target - current_q)

@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Tuple, List
 from corridor import Corridor, Action
 from models.base_agent import BaseAgent
-from models.rl_utils import get_canonical_state
+from models.rl_utils import get_representation_state, state_to_tensor
 import numpy as np
 import random
 from collections import deque
@@ -10,102 +10,23 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-def state_to_features(obs: Dict, board_size: int) -> np.ndarray:
+def action_to_features(action: Action, board_size: int) -> np.ndarray:
     """
-    Convert observation to feature vector for DQN.
-    Uses more strategic features for better learning.
+    Convert an action to a simple feature vector.
+    [is_move, is_wall, r_norm, c_norm, is_horizontal, is_vertical]
     """
-    N = board_size
+    N = float(board_size)
     features = []
-    
-    # Current player perspective
-    to_play = obs['to_play']
-    my_pos = obs['p1'] if to_play == 1 else obs['p2']
-    opp_pos = obs['p2'] if to_play == 1 else obs['p1']
-    my_goal = N - 1 if to_play == 1 else 0
-    opp_goal = 0 if to_play == 1 else N - 1
-    
-    # Normalized positions
-    features.append(my_pos[0] / N)
-    features.append(my_pos[1] / N)
-    features.append(opp_pos[0] / N)
-    features.append(opp_pos[1] / N)
-    
-    # Distance to goal (key strategic feature)
-    my_dist = abs(my_pos[0] - my_goal)
-    opp_dist = abs(opp_pos[0] - opp_goal)
-    features.append(my_dist / N)
-    features.append(opp_dist / N)
-    
-    # Relative advantage
-    features.append((opp_dist - my_dist) / N)
-    
-    # Walls remaining
-    my_walls = obs['walls_left'][to_play]
-    opp_walls = obs['walls_left'][3 - to_play]
-    features.append(my_walls / 10)
-    features.append(opp_walls / 10)
-    
-    # Wall advantage
-    features.append((my_walls - opp_walls) / 10)
-    
-    # Manhattan distance between players
-    manhattan = abs(my_pos[0] - opp_pos[0]) + abs(my_pos[1] - opp_pos[1])
-    features.append(manhattan / (2 * N))
-    
-    # Number of moves available (mobility)
-    move_count = 0
-    for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
-        nr, nc = my_pos[0] + dr, my_pos[1] + dc
-        if 0 <= nr < N and 0 <= nc < N:
-            move_count += 1
-    features.append(move_count / 4)
-    
-    return np.array(features, dtype=np.float32)
-
-
-def action_to_features(action: Action, obs: Dict, board_size: int) -> np.ndarray:
-    """
-    Convert an action to a feature vector with strategic information.
-    """
-    N = board_size
-    features = []
-    
-    to_play = obs['to_play']
-    my_pos = obs['p1'] if to_play == 1 else obs['p2']
-    opp_pos = obs['p2'] if to_play == 1 else obs['p1']
-    my_goal = N - 1 if to_play == 1 else 0
     
     kind = action[0]
     if kind == "M":
         _, (r, c) = action
-        features.append(1.0)  # Is move
-        features.append(0.0)  # Not wall
-        features.append(r / N)
-        features.append(c / N)
-        features.append(0.0)  # Wall orientation
-        
-        # Distance change to goal
-        old_dist = abs(my_pos[0] - my_goal)
-        new_dist = abs(r - my_goal)
-        features.append((old_dist - new_dist) / N)  # Positive if moving closer
-        
-        # Distance to opponent
-        dist_to_opp = abs(r - opp_pos[0]) + abs(c - opp_pos[1])
-        features.append(dist_to_opp / (2 * N))
-        
+        features = [1.0, 0.0, r/N, c/N, 0.0, 0.0]
     elif kind == "W":
         _, (r, c, ori) = action
-        features.append(0.0)  # Not move
-        features.append(1.0)  # Is wall
-        features.append(r / N)
-        features.append(c / N)
-        features.append(1.0 if ori == "H" else 0.0)
-        
-        # Wall blocks opponent (approximate)
-        wall_blocks_opp = 1.0 if abs(r - opp_pos[0]) <= 1 and abs(c - opp_pos[1]) <= 1 else 0.0
-        features.append(wall_blocks_opp)
-        features.append(0.0)  # Placeholder
+        is_h = 1.0 if ori == "H" else 0.0
+        is_v = 1.0 if ori == "V" else 0.0
+        features = [0.0, 1.0, r/N, c/N, is_h, is_v]
     
     return np.array(features, dtype=np.float32)
 
@@ -113,7 +34,6 @@ def action_to_features(action: Action, obs: Dict, board_size: int) -> np.ndarray
 class DQN(nn.Module):
     """
     DQN that takes state + action as input and outputs Q-value.
-    Optimized for speed with smaller architecture.
     """
     def __init__(self, state_dim, action_dim):
         super(DQN, self).__init__()
@@ -140,9 +60,9 @@ class ReplayBuffer:
     def __init__(self, capacity=10000):
         self.queue = deque(maxlen=capacity)
 
-    def push(self, state, action_features, reward, next_state, next_obs, done, next_legal_actions=None):
-        """Store experience including next observation and legal actions for proper target computation."""
-        self.queue.append((state, action_features, reward, next_state, next_obs, done, next_legal_actions))
+    def push(self, state, action_features, reward, next_state, done, next_legal_actions=None):
+        """Store experience."""
+        self.queue.append((state, action_features, reward, next_state, done, next_legal_actions))
 
     def sample(self, batch_size):
         return random.sample(self.queue, batch_size)
@@ -188,8 +108,8 @@ class DQNAgent(BaseAgent):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Updated dimensions
-        self.state_dim = 12  # From improved state_to_features
-        self.action_dim = 7  # From improved action_to_features
+        self.state_dim = 10  # From get_representation_state
+        self.action_dim = 6  # From action_to_features
 
         self.q_network = DQN(self.state_dim, self.action_dim).to(self.device)
         self.target_network = DQN(self.state_dim, self.action_dim).to(self.device)
@@ -204,25 +124,29 @@ class DQNAgent(BaseAgent):
         if load_path:
             pass  # TODO: implement loading
 
-    def _evaluate_actions_batch(self, state_features: np.ndarray, legal_actions: List[Action], obs: Dict, network=None) -> Tuple[List[float], Action]:
+    def _evaluate_actions_batch(self, state_tensor: torch.Tensor, legal_actions: List[Action], network=None) -> Tuple[List[float], Action]:
         """Efficiently evaluate all legal actions in batch."""
         if network is None:
             network = self.q_network
             
         # Prepare batch
-        state_batch = []
-        action_batch = []
+        # state_tensor is already (1, state_dim) or (state_dim,)
+        if state_tensor.dim() == 1:
+            state_tensor = state_tensor.unsqueeze(0)
+            
+        # Repeat state for all actions
+        num_actions = len(legal_actions)
+        state_batch = state_tensor.repeat(num_actions, 1)
         
+        action_batch = []
         for action in legal_actions:
-            action_features = action_to_features(action, obs, self.board_size)
-            state_batch.append(state_features)
+            action_features = action_to_features(action, self.board_size)
             action_batch.append(action_features)
         
-        state_tensor = torch.FloatTensor(np.array(state_batch)).to(self.device)
         action_tensor = torch.FloatTensor(np.array(action_batch)).to(self.device)
         
         with torch.no_grad():
-            q_values = network(state_tensor, action_tensor).cpu().numpy()
+            q_values = network(state_batch, action_tensor).cpu().numpy()
         
         best_idx = np.argmax(q_values)
         return q_values, legal_actions[best_idx]
@@ -237,28 +161,29 @@ class DQNAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # Get state features
-        state_features = state_to_features(obs, self.board_size)
+        state_tuple = get_representation_state(obs, env)
+        state_arr = state_to_tensor(state_tuple, self.board_size)
+        state_tensor = torch.FloatTensor(state_arr).to(self.device)
         
         # Batch evaluate all legal actions
-        _, best_action = self._evaluate_actions_batch(state_features, legal_actions, obs)
+        _, best_action = self._evaluate_actions_batch(state_tensor, legal_actions)
         
         return best_action
 
-    def update(self, state, action, reward, next_state, next_action, done, env=None, next_obs=None, obs=None, next_legal_actions=None):
-        # Convert state tuple to features if needed
-        if isinstance(state, tuple):
-            return
+    def update(self, state, action, reward, next_state, next_action, done, env=None, next_legal_actions=None):
+        """
+        Update DQN.
+        state: tuple (unified state)
+        next_state: tuple (unified state)
+        """
+        # Convert state tuple to tensor features
+        state_arr = state_to_tensor(state, self.board_size)
+        next_state_arr = state_to_tensor(next_state, self.board_size) if next_state else np.zeros(self.state_dim)
         
-        # Get action features using proper observation
-        if obs is None:
-            # Fallback: reconstruct basic obs from state (not ideal but works)
-            obs = {'to_play': 1, 'p1': (int(state[0] * self.board_size), int(state[1] * self.board_size)), 
-                   'p2': (int(state[2] * self.board_size), int(state[3] * self.board_size))}
+        action_features = action_to_features(action, self.board_size)
         
-        action_features = action_to_features(action, obs, self.board_size)
-        
-        # Store experience with next observation and legal actions
-        self.buffer.push(state, action_features, reward, next_state, next_obs, done, next_legal_actions)
+        # Store experience
+        self.buffer.push(state_arr, action_features, reward, next_state_arr, done, next_legal_actions)
         
         self.step_count += 1
 
@@ -272,10 +197,9 @@ class DQNAgent(BaseAgent):
         states = np.array([batch[0] for batch in batches], dtype=np.float32)
         action_features = np.array([batch[1] for batch in batches], dtype=np.float32)
         rewards = np.array([batch[2] for batch in batches], dtype=np.float32)
-        next_states = np.array([batch[3] if batch[3] is not None else batch[0] for batch in batches], dtype=np.float32)
-        next_obs_list = [batch[4] for batch in batches]
-        dones = np.array([batch[5] for batch in batches], dtype=np.float32)
-        next_legal_actions_list = [batch[6] if len(batch) > 6 else None for batch in batches]
+        next_states = np.array([batch[3] for batch in batches], dtype=np.float32)
+        dones = np.array([batch[4] for batch in batches], dtype=np.float32)
+        next_legal_actions_list = [batch[5] for batch in batches]
         
         states = torch.FloatTensor(states).to(self.device)
         action_features = torch.FloatTensor(action_features).to(self.device)
@@ -286,29 +210,23 @@ class DQNAgent(BaseAgent):
         # Current Q-values
         q_values = self.q_network(states, action_features)
 
-        # Target Q-values - properly compute max over legal actions
+        # Target Q-values
         with torch.no_grad():
             next_q_values = []
-            for i, next_obs in enumerate(next_obs_list):
-                if next_obs is None or dones[i] == 1.0:
-                    # Terminal state
+            for i in range(self.batch_size):
+                if dones[i] == 1.0:
                     next_q_values.append(0.0)
                 else:
-                    # Use stored legal actions if available
                     next_legal_actions = next_legal_actions_list[i]
-                    if next_legal_actions and len(next_legal_actions) > 0:
-                        # Batch evaluate legal actions for this next state
+                    if next_legal_actions:
                         q_vals, _ = self._evaluate_actions_batch(
-                            next_states[i].cpu().numpy(), 
+                            next_states[i], 
                             next_legal_actions, 
-                            next_obs,
                             network=self.target_network
                         )
                         max_q = np.max(q_vals)
                     else:
-                        # Fallback: estimate with 0 (conservative)
                         max_q = 0.0
-                    
                     next_q_values.append(max_q)
             
             next_q_values = torch.FloatTensor(next_q_values).to(self.device)

@@ -4,7 +4,7 @@ import random
 from .base_agent import BaseAgent
 import numpy as np
 from collections import defaultdict
-from .rl_utils import get_canonical_state
+from .rl_utils import get_representation_state
 
 class QlearningAgent(BaseAgent):
     """Q-learning Agent"""
@@ -50,7 +50,7 @@ class QlearningAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # Get normalized state
-        state_features = get_canonical_state(obs, env)
+        state_features = get_representation_state(obs, env)
 
         # Greedy exploitation: choose action with highest Q-value
         best_q = -float('inf')

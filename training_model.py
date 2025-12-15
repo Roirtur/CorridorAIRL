@@ -1,217 +1,122 @@
 import argparse
-import glob
 import os
-import re
+import random
+import numpy as np
 from corridor import Corridor
 from models import SarsaAgent, GreedyPathAgent, RandomAgent, DQNAgent, QlearningAgent
-from models.rl_utils import generate_save_path
+from models.rl_utils import run_episode, save_model, generate_save_path
 
-# Define available models to train
 MODELS = {
     'sarsa': SarsaAgent,
     'dqn': DQNAgent,
     'qlearn': QlearningAgent
 }
 
-# Define available adversaries (factories to create fresh instances)
-ADVERSARIES = {
-    "greedy": lambda: GreedyPathAgent(name="Greedy", wall_prob=0.1),
-    "random": lambda: RandomAgent(name="Random"),
-    "sarsa": lambda: SarsaAgent(name="Sarsa_Adv", epsilon=0.01, training_mode=False),
-    "qlearn": lambda: QlearningAgent(name="Qlearn_Adv", epsilon=0.01, training_mode=False)
-}
-
-def extract_model_info(filepath: str) -> dict:
-    """Extract model info from filename: model_N{size}_E{episodes}_vs_{adversaries}.pkl"""
-    basename = os.path.basename(filepath)
+def evaluate(agent, env, adversaries, num_games=20):
+    """Evaluate agent against a list of adversaries."""
+    results = {}
+    original_epsilon = agent.epsilon
+    agent.epsilon = 0.0  # Greedy for evaluation
     
-    # Pattern: model_N9_E10000_vs_random_greedy_qlearn_sarsa_self.pkl
-    pattern = r"(\w+)_N(\d+)_E(\d+)_vs_(.+)\.pkl"
-    match = re.match(pattern, basename)
-    
-    if match:
-        model_name = match.group(1)
-        board_size = int(match.group(2))
-        episodes = int(match.group(3))
-        adversaries = match.group(4).split('_')
+    for adv in adversaries:
+        wins = 0
+        for _ in range(num_games):
+            # Evaluation runs are not training runs
+            if run_episode(env, agent, adv, training=False) == 1:
+                wins += 1
+        results[adv.name] = wins / num_games
         
-        return {
-            'model': model_name,
-            'board_size': board_size,
-            'episodes': episodes,
-            'adversaries': set(adversaries),
-            'path': filepath
-        }
-    return None
+    agent.epsilon = original_epsilon
+    return results
 
-def find_models_with_params(board_size: int, adversaries: list, episodes: int) -> dict:
+def train(agent, env, total_episodes, save_path, min_epsilon=0.1, epsilon_decay_ratio=0.9995):
     """
-    Find trained SARSA and QLEARN models that were trained on the same board size, adversaries, AND episodes.
-    Returns: {'sarsa': path, 'qlearn': path} or {} if not found
+    Professional training loop with curriculum and proper decay.
+    epsilon_decay_ratio: proportion of training over which to decay epsilon (default: 95% of episodes)
     """
-    found_models = {}
-    adversaries_set = set(adversaries)
-    if "self" in adversaries_set:
-        adversaries_set.remove("self")
-    adversaries_set.add("self")  # Always include self
+    # Adversaries
+    random_adv = RandomAgent(name="Random")
+    greedy_adv = GreedyPathAgent(name="Greedy", wall_prob=0.1)
     
-    pattern = "saved_models/*.pkl"
-    files = glob.glob(pattern)
+    # Curriculum phases
+    phase1_end = int(total_episodes * 0.3)
+    phase2_end = int(total_episodes * 0.6)
     
-    for filepath in files:
-        info = extract_model_info(filepath)
-        if not info:
-            continue
-        
-        # Check if board size matches
-        if info['board_size'] != board_size:
-            continue
-        
-        # Check if episodes match
-        if info['episodes'] != episodes:
-            continue
-        
-        # Check if adversaries match (same set)
-        if info['adversaries'] == adversaries_set:
-            model_type = info['model']
-            if model_type not in found_models:
-                found_models[model_type] = filepath
-                print(f"✓ Found {model_type.upper()} trained on N={board_size}, E={episodes} with adversaries {adversaries_set}: {filepath}")
+    # Epsilon decay - exponential decay for smoother, slower reduction
+    start_epsilon = agent.epsilon
+    decay_end_episode = int(total_episodes * epsilon_decay_ratio)
+    # Calculate decay rate for exponential decay: eps = start * (decay_rate ^ episode)
+    decay_rate = (min_epsilon / start_epsilon) ** (1.0 / decay_end_episode)
     
-    return found_models
-
-def find_trained_model(model_name: str, board_size: int) -> str:
-    """Find a trained model for the given type and board size"""
-    pattern = f"saved_models/{model_name}_N{board_size}_*.pkl"
-    files = glob.glob(pattern)
-    if files:
-        # Return the most recent file
-        latest = max(files, key=os.path.getctime)
-        return latest
-    return None
+    best_win_rate = 0.0
+    
+    print(f"Starting Professional Training for {agent.name}")
+    print(f"Total Episodes: {total_episodes}")
+    print(f"Epsilon: {start_epsilon:.3f} -> {min_epsilon:.3f} over {decay_end_episode} episodes (exponential)")
+    print(f"Curriculum: Random -> Greedy -> Self/Mix")
+    
+    for episode in range(1, total_episodes + 1):
+        # 1. Select Adversary based on curriculum
+        if episode <= phase1_end:
+            adversary = random_adv
+        elif episode <= phase2_end:
+            adversary = greedy_adv
+        else:
+            # Mix: 20% Random, 30% Greedy, 50% Self
+            r = random.random()
+            if r < 0.2: adversary = random_adv
+            elif r < 0.5: adversary = greedy_adv
+            else: adversary = agent # Self-play
+            
+        # 2. Run Episode
+        run_episode(env, agent, adversary, training=True)
+        
+        # 3. Decay Epsilon (exponential)
+        if episode <= decay_end_episode:
+            agent.epsilon = max(min_epsilon, start_epsilon * (decay_rate ** episode))
+            
+        # 4. Evaluate & Log
+        if episode % 100 == 0:
+            eval_results = evaluate(agent, env, [random_adv, greedy_adv])
+            avg_win = sum(eval_results.values()) / len(eval_results)
+            
+            print(f"Ep {episode}/{total_episodes} | Eps: {agent.epsilon:.3f} | "
+                  f"Win Rates: Random={eval_results['Random']:.2f}, Greedy={eval_results['Greedy']:.2f}")
+            
+            # Save if best (or just periodically)
+            if episode % 500 == 0 and avg_win >= best_win_rate:
+                best_win_rate = avg_win
+                if save_path:
+                    save_model(agent, save_path, env, "professional", episode)
+                    print(f"  -> New Best Model Saved! ({best_win_rate:.2f})")
 
 def main():
-    parser = argparse.ArgumentParser(description="Train RL Agent for Corridor")
-    parser.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()), help="Model to train")
-    parser.add_argument("--episodes", type=int, default=10000, help="Number of episodes")
-    parser.add_argument("--board_size", type=int, default=9, help="Board size (N)")
-    parser.add_argument("--walls", type=int, default=10, help="Walls per player (standard 10 for 9x9)")
-    parser.add_argument("--adversary", nargs='+', default=None, help="Adversary type(s)")
-    parser.add_argument("--load_adversary", nargs='+', help="Load adversary models: name=path")
-    parser.add_argument("--save_path", type=str, default=None, help="Path to save model")
-    parser.add_argument("--alpha", type=float, default=0.1, help="Learning rate")
-    parser.add_argument("--epsilon", type=float, default=1.0, help="Starting epsilon")
-    parser.add_argument("--gamma", type=float, default=0.98, help="Discount factor")
-    parser.add_argument("--min_epsilon", type=float, default=0.1, help="Minimum epsilon")
-    parser.add_argument("--epsilon_decay", type=float, default=None, help="Epsilon decay factor (multiplicative). If not set, uses linear decay.")
+    parser = argparse.ArgumentParser(description="Professional RL Training")
+    parser.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))
+    parser.add_argument("--episodes", type=int, default=10000)
+    parser.add_argument("--board_size", type=int, default=9)
+    parser.add_argument("--walls", type=int, default=10)
+    parser.add_argument("--save_path", type=str, default=None)
     
     args = parser.parse_args()
     
-    # Parse load_adversary
-    adversary_paths = {}
-    if args.load_adversary:
-        for item in args.load_adversary:
-            if '=' in item:
-                key, val = item.split('=', 1)
-                adversary_paths[key] = val
-            else:
-                print(f"Warning: Invalid format for load_adversary '{item}'. Expected name=path.")
-
-    # Auto-detect trained models if no adversary specified
-    if args.adversary is None:
-        args.adversary = ["random", "greedy"]  # Default base adversaries
-        
-        # Search for trained models with the same board_size, episodes AND adversaries
-        found_models = find_models_with_params(args.board_size, args.adversary, args.episodes)
-        
-        if found_models:
-            for model_type, path in found_models.items():
-                args.adversary.append(model_type)
-                adversary_paths[model_type] = path
-        
-        if len(args.adversary) == 2:  # Only random and greedy
-            print(f"No trained models found for N={args.board_size}, E={args.episodes} with these adversaries. Using Random + Greedy only.")
-
-    # Generate default save path if not provided
-    if args.save_path is None:
-        # Create a descriptive name based on adversaries
-        adv_names = list(args.adversary)
-        if "self" not in adv_names:
-            adv_names.append("self")
-        adv_str = "_".join(adv_names)
-        args.save_path = generate_save_path("saved_models", args.model, args.board_size, args.episodes, adv_str)
-    
-    print(f"\nInitializing training on {args.board_size}x{args.board_size} board with {args.walls} walls.")
-    print(f"Optimizations enabled: Canonical State (Symmetry+Perspective), Action Pruning, Reward Shaping.")
-    print(f"Adversaries: {args.adversary} + self")
-    print(f"Save path: {args.save_path}\n")
-    
-    # Setup Environment
     env = Corridor(N=args.board_size, walls_per_player=args.walls)
     
-    # Setup Agent
     agent_cls = MODELS[args.model]
-    
-    # Prepare agent kwargs - only DQN needs board_size
-    agent_kwargs = {
-        'name': args.model.capitalize(),
-        'alpha': args.alpha, 
-        'gamma': args.gamma, 
-        'epsilon': args.epsilon,
+    kwargs = {
+        'name': args.model.capitalize(), 
         'training_mode': True,
+        'epsilon': 1.0  # Start with full exploration
     }
-    
-    # Add board_size only for DQN
     if args.model == 'dqn':
-        agent_kwargs['board_size'] = args.board_size
+        kwargs['board_size'] = args.board_size
+        
+    agent = agent_cls(**kwargs)
     
-    agent = agent_cls(**agent_kwargs)
+    if not args.save_path:
+        args.save_path = f"saved_models/{args.model}_professional_N{args.board_size}.pkl"
         
-    if os.path.exists(args.save_path):
-        print(f"Loading existing model from {args.save_path}...")
-        agent.load(args.save_path)
-        
-    # Curriculum Training
-    adversaries_list = list(args.adversary)
-    if "self" not in adversaries_list:
-        adversaries_list.append("self")
-        
-    active_adversaries = []
-    
-    for i, adv_name in enumerate(adversaries_list):
-        if adv_name == "self":
-            adversary = agent  # Self-play
-        elif adv_name in ADVERSARIES:
-            adversary = ADVERSARIES[adv_name]()
-            
-            # Load pretrained model if specified or found
-            adv_path = adversary_paths.get(adv_name)
-            if adv_path and os.path.exists(adv_path):
-                print(f"Loading {adv_name} from {adv_path}")
-                if hasattr(adversary, 'load'):
-                    adversary.load(adv_path)
-                    print(f"  ✓ Q-table loaded ({len(adversary.q_table)} states)")
-                else:
-                    print(f"  ⚠ Warning: {adv_name} does not support loading.")
-            elif adv_name in ["sarsa", "qlearn"]:
-                print(f"  ⚠ Warning: No trained {adv_name} model found. Will play randomly.")
-        else:
-            print(f"Unknown adversary: {adv_name}, skipping.")
-            continue
-            
-        active_adversaries.append(adversary)
-        
-    if not active_adversaries:
-        print("No valid adversaries found. Exiting.")
-        return
-
-    print(f"\n=== Training against: {', '.join([adv.name for adv in active_adversaries])} ===\n")
-    agent.train(env, active_adversaries, args.episodes, args.save_path, 
-                start_epsilon=args.epsilon, 
-                end_epsilon=args.min_epsilon, 
-                alpha=args.alpha,
-                gamma=args.gamma,
-                epsilon_decay=args.epsilon_decay)
+    train(agent, env, args.episodes, args.save_path)
 
 if __name__ == "__main__":
     main()

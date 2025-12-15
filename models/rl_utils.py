@@ -4,68 +4,75 @@ import random
 from typing import Dict, Optional, Any, List, Union
 from corridor import Corridor, Action
 from .base_agent import BaseAgent
+import numpy as np
 
-def get_canonical_state(obs: Dict, env: Corridor) -> tuple:
+def get_representation_state(obs: Dict, env: Corridor) -> tuple:
     """
-    Converts observation to a canonical state tuple to reduce state space.
-    Applies player perspective and horizontal symmetry.
+    Unified state representation for all agents.
+    Returns a tuple: (my_r, my_c, opp_r, opp_c, my_walls, opp_walls, valid_n, valid_s, valid_w, valid_e)
+    
+    This representation is:
+    1. Perspective-aligned (P2 is flipped to look like P1)
+    2. Simple (no horizontal symmetry)
+    3. Neural-network friendly (can be directly converted to tensor)
     """
     N = obs['N']
     player = obs['to_play']
     
     # 1. Player perspective (always "me" vs "opponent")
+    # We align everything so "me" starts at top (0, N//2) and goes to bottom (N-1, *)
     if player == 1:
         my_pos = obs['p1']
         opp_pos = obs['p2']
         my_walls = obs['walls_left'][1]
+        opp_walls = obs['walls_left'][2]
     else:
         # Flip board vertically for P2
         my_pos = (N - 1 - obs['p2'][0], obs['p2'][1])
         opp_pos = (N - 1 - obs['p1'][0], obs['p1'][1])
         my_walls = obs['walls_left'][2]
-    
-    # 2. Horizontal symmetry
-    # We want to map states to the "left" side as much as possible.
-    # If my_pos is on the right, flip.
-    # If my_pos is in the center, check opp_pos.
-    
-    should_flip = False
-    if my_pos[1] > N // 2:
-        should_flip = True
-    elif my_pos[1] == N // 2:
-        if opp_pos[1] > N // 2:
-            should_flip = True
-            
-    if should_flip:
-        my_pos = (my_pos[0], N - 1 - my_pos[1])
-        opp_pos = (opp_pos[0], N - 1 - opp_pos[1])
-    
-    # 3. Local Wall/Boundary Awareness
-    # Check valid moves in the *canonical* perspective
-    # We do this by checking real moves and transforming them
-    
+        opp_walls = obs['walls_left'][1]
+
+    # 2. Valid moves (local view)
+    # We need to check valid moves in the *canonical* perspective
     real_p = obs['p1'] if player == 1 else obs['p2']
     r, c = real_p
     
     # Real directions: N(-1,0), S(1,0), W(0,-1), E(0,1)
-    # We use env._can_step to check walls and boundaries
-    can_n = env._can_step(real_p, (r-1, c))
-    can_s = env._can_step(real_p, (r+1, c))
-    can_w = env._can_step(real_p, (r, c-1))
-    can_e = env._can_step(real_p, (r, c+1))
+    # env._can_step checks if the move is valid (bounds + walls)
+    # We use 1.0 for valid, 0.0 for invalid to be NN friendly
+    can_n = 1.0 if env._can_step(real_p, (r-1, c)) else 0.0
+    can_s = 1.0 if env._can_step(real_p, (r+1, c)) else 0.0
+    can_w = 1.0 if env._can_step(real_p, (r, c-1)) else 0.0
+    can_e = 1.0 if env._can_step(real_p, (r, c+1)) else 0.0
     
-    # Transform to canonical perspective
+    # Transform to canonical perspective if we flipped for P2
     if player == 2:
         # Vertical flip: North <-> South
         can_n, can_s = can_s, can_n
         
-    if should_flip:
-        # Horizontal flip: West <-> East
-        can_w, can_e = can_e, can_w
-        
-    valid_mask = (can_n, can_s, can_w, can_e)
+    return (
+        float(my_pos[0]), float(my_pos[1]), 
+        float(opp_pos[0]), float(opp_pos[1]), 
+        float(my_walls), float(opp_walls), 
+        can_n, can_s, can_w, can_e
+    )
+
+def state_to_tensor(state: tuple, board_size: int) -> np.ndarray:
+    """
+    Converts the unified state tuple to a normalized numpy array for Neural Networks.
+    """
+    N = float(board_size)
+    # Normalize positions by N
+    # Normalize walls by 10 (max walls)
+    # Valid moves are already 0/1
     
-    return (my_pos, opp_pos, my_walls > 0, valid_mask)
+    return np.array([
+        state[0] / N, state[1] / N,       # My Pos
+        state[2] / N, state[3] / N,       # Opp Pos
+        state[4] / 10.0, state[5] / 10.0, # Walls
+        state[6], state[7], state[8], state[9] # Valid moves
+    ], dtype=np.float32)
 
 def get_shaped_reward(env: Corridor, my_id: int) -> float:
     """
@@ -157,18 +164,8 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         obs, _, done, info = env.step(opp_action)
         if done: return 0 # Opponent won immediately (unlikely)
 
-    # Check if agent is DQN (uses raw obs) or Q-learning (uses canonical state)
-    from models.dqn_agent import DQNAgent
-    is_dqn = isinstance(agent, DQNAgent)
-    
-    if is_dqn:
-        from models.dqn_agent import state_to_features
-        state = state_to_features(obs, env.N)
-        state_obs = obs  # Keep observation for DQN
-    else:
-        state = get_canonical_state(obs, env)
-        state_obs = None
-    
+    # Unified state for everyone
+    state = get_representation_state(obs, env)
     action = agent.select_action(env, obs)
     
     phi_s = get_shaped_reward(env, my_id)
@@ -176,15 +173,11 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
     done = False
     while not done:
         # 1. Execute our action
-        prev_obs = obs  # Store for DQN
         obs, reward, done, info = env.step(action)
         
         if done:
             if training:
-                if is_dqn:
-                    agent.update(state, action, 1.0, None, None, True, env=None, next_obs=None, obs=prev_obs, next_legal_actions=None)
-                else:
-                    agent.update(state, action, 1.0, None, None, True, env=None, next_legal_actions=None)
+                agent.update(state, action, 1.0, None, None, True, env=None, next_legal_actions=None)
             return 1
         
         # 2. Opponent's turn
@@ -193,21 +186,11 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         
         if done:
             if training:
-                if is_dqn:
-                    agent.update(state, action, -1.0, None, None, True, env=None, next_obs=None, obs=prev_obs, next_legal_actions=None)
-                else:
-                    agent.update(state, action, -1.0, None, None, True, env=None, next_legal_actions=None)
+                agent.update(state, action, -1.0, None, None, True, env=None, next_legal_actions=None)
             return 0
         
         # 3. Prepare next step
-        if is_dqn:
-            next_state = state_to_features(obs, env.N)
-            next_obs = obs
-        else:
-            next_state = get_canonical_state(obs, env)
-            next_obs = None
-        
-        # Get legal actions for next state (needed for proper Q-learning)
+        next_state = get_representation_state(obs, env)
         next_legal_actions = env.legal_actions()
         next_action = agent.select_action(env, obs)
         
@@ -215,15 +198,11 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
             phi_next_s = get_shaped_reward(env, my_id)
             shaped_reward = 0.0 + agent.gamma * phi_next_s - phi_s
             
-            if is_dqn:
-                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_obs=next_obs, obs=prev_obs, next_legal_actions=next_legal_actions)
-            else:
-                agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_legal_actions=next_legal_actions)
+            agent.update(state, action, shaped_reward, next_state, next_action, False, env=env, next_legal_actions=next_legal_actions)
             phi_s = phi_next_s
         
         state = next_state
         action = next_action
-        prev_obs = obs  # Update for next iteration
         
     return 0
 

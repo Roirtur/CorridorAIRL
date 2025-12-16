@@ -1,7 +1,7 @@
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Any
 from corridor import Corridor, Action
 from models.base_agent import BaseAgent
-from models.rl_utils import get_representation_state, state_to_tensor
+from models.rl_utils import load_model
 import numpy as np
 import random
 from collections import deque
@@ -9,6 +9,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# -------------------------------------------------------------------
+# Helper: Action to Features & Flip
+# -------------------------------------------------------------------
 
 def action_to_features(action: Action, board_size: int) -> np.ndarray:
     """
@@ -30,218 +33,400 @@ def action_to_features(action: Action, board_size: int) -> np.ndarray:
     
     return np.array(features, dtype=np.float32)
 
-
-class DQN(nn.Module):
+def flip_action(action: Action, N: int) -> Action:
     """
-    DQN that takes state + action as input and outputs Q-value.
+    Flips an action from P2's perspective to P1's canonical perspective.
     """
-    def __init__(self, state_dim, action_dim):
-        super(DQN, self).__init__()
-        input_dim = state_dim + action_dim
-        self.layer1 = nn.Linear(input_dim, 128)
-        self.layer2 = nn.Linear(128, 64)
-        self.layer3 = nn.Linear(64, 1)
-        self.relu = nn.ReLU()
+    kind = action[0]
+    if kind == "M":
+        _, (r, c) = action
+        return ("M", (N - 1 - r, c))
+    elif kind == "W":
+        _, (r, c, ori) = action
+        if ori == "H":
+            # H wall at r blocks r, r+1.
+            # Flipped blocks N-1-r, N-r-2.
+            # Wall at k blocks k, k+1. So k = N-r-2.
+            return ("W", (N - r - 2, c, "H"))
+        else:
+            # V wall at r blocks r, r (col c, c+1).
+            # Flipped blocks N-1-r.
+            return ("W", (N - 1 - r, c, "V"))
+    return action
 
-    def forward(self, state, action):
-        """
-        state: (batch, state_dim)
-        action: (batch, action_dim)
-        returns: (batch,) Q-values
-        """
-        x = torch.cat([state, action], dim=1)
-        x = self.relu(self.layer1(x))
-        x = self.relu(self.layer2(x))
-        x = self.layer3(x)
-        return x.squeeze(1)
+# -------------------------------------------------------------------
+# Prioritized Experience Replay (SumTree + Buffer)
+# -------------------------------------------------------------------
 
+class SumTree:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1)
+        self.data = np.zeros(capacity, dtype=object)
+        self.write = 0
+        self.n_entries = 0
 
-class ReplayBuffer:
-    def __init__(self, capacity=10000):
-        self.queue = deque(maxlen=capacity)
+    def _propagate(self, idx: int, change: float):
+        parent = (idx - 1) // 2
+        self.tree[parent] += change
+        if parent != 0:
+            self._propagate(parent, change)
 
-    def push(self, state, action_features, reward, next_state, done, next_legal_actions=None):
-        """Store experience."""
-        self.queue.append((state, action_features, reward, next_state, done, next_legal_actions))
+    def _retrieve(self, idx: int, s: float) -> int:
+        left = 2 * idx + 1
+        right = left + 1
 
-    def sample(self, batch_size):
-        return random.sample(self.queue, batch_size)
+        if left >= len(self.tree):
+            return idx
+
+        if s <= self.tree[left]:
+            return self._retrieve(left, s)
+        else:
+            return self._retrieve(right, s - self.tree[left])
+
+    def total(self) -> float:
+        return self.tree[0]
+
+    def add(self, p: float, data: Any):
+        idx = self.write + self.capacity - 1
+        self.data[self.write] = data
+        self.update(idx, p)
+
+        self.write += 1
+        if self.write >= self.capacity:
+            self.write = 0
+        
+        if self.n_entries < self.capacity:
+            self.n_entries += 1
+
+    def update(self, idx: int, p: float):
+        change = p - self.tree[idx]
+        self.tree[idx] = p
+        self._propagate(idx, change)
+
+    def get(self, s: float) -> Tuple[int, float, Any]:
+        idx = self._retrieve(0, s)
+        dataIdx = idx - self.capacity + 1
+        return (idx, self.tree[idx], self.data[dataIdx])
+
+class PrioritizedReplayBuffer:
+    def __init__(self, capacity: int = 10000, alpha: float = 0.6):
+        self.tree = SumTree(capacity)
+        self.alpha = alpha
+        self.capacity = capacity
+        self.epsilon = 0.01
+
+    def push(self, state, action_features, reward, next_state, done, next_legal_features=None):
+        max_p = np.max(self.tree.tree[-self.tree.capacity:])
+        if max_p == 0:
+            max_p = 1.0
+        
+        data = (state, action_features, reward, next_state, done, next_legal_features)
+        self.tree.add(max_p, data)
+
+    def sample(self, batch_size: int, beta: float = 0.4) -> Tuple[List[Any], np.ndarray, np.ndarray]:
+        batch = []
+        idxs = []
+        segment = self.tree.total() / batch_size
+        priorities = []
+
+        for i in range(batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = random.uniform(a, b)
+            (idx, p, data) = self.tree.get(s)
+            batch.append(data)
+            idxs.append(idx)
+            priorities.append(p)
+
+        sampling_probabilities = np.array(priorities) / self.tree.total()
+        is_weights = np.power(self.tree.n_entries * sampling_probabilities, -beta)
+        is_weights /= is_weights.max()
+
+        return batch, np.array(idxs), np.array(is_weights, dtype=np.float32)
+
+    def update_priorities(self, idxs: np.ndarray, errors: np.ndarray):
+        for idx, error in zip(idxs, errors):
+            p = (error + self.epsilon) ** self.alpha
+            self.tree.update(idx, p)
 
     def __len__(self):
-        return len(self.queue)
+        return self.tree.n_entries
 
+# -------------------------------------------------------------------
+# Neural Network: Dueling DQN Architecture
+# -------------------------------------------------------------------
+
+class DuelingDQN(nn.Module):
+    def __init__(self, state_dim: int, action_dim: int):
+        super(DuelingDQN, self).__init__()
+        
+        # Feature extractors
+        self.state_encoder = nn.Sequential(
+            nn.Linear(state_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU()
+        )
+        
+        self.action_encoder = nn.Sequential(
+            nn.Linear(action_dim, 64),
+            nn.ReLU()
+        )
+
+        # Value Stream: V(s)
+        self.value_stream = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+        # Advantage Stream: A(s, a)
+        self.advantage_stream = nn.Sequential(
+            nn.Linear(128 + 64, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
+
+    def forward(self, state, action):
+        s_feat = self.state_encoder(state)
+        a_feat = self.action_encoder(action)
+        
+        val = self.value_stream(s_feat)
+        
+        sa_feat = torch.cat([s_feat, a_feat], dim=1)
+        adv = self.advantage_stream(sa_feat)
+        
+        q_val = val + adv
+        return q_val.squeeze(1)
+
+# -------------------------------------------------------------------
+# DQN Agent
+# -------------------------------------------------------------------
 
 class DQNAgent(BaseAgent):
-    """DQN Agent with proper action-value Q-learning"""
     def __init__(
         self,
-        name: str = "DQN",
+        name: str = "DQN_PER",
         seed: int | None = None,
-        alpha: float = 0.0003,      # Slightly higher for faster learning
-        gamma: float = 0.995,       # Higher discount for long-term planning
-        epsilon: float = 1.0,       # Start with full exploration
+        alpha: float = 0.0001,
+        gamma: float = 0.99,
+        epsilon: float = 1.0,
         training_mode: bool = True,
         load_path: Optional[str] = None,
-        buffer_size=10000,          # Sufficient buffer
-        batch_size=64,              # Smaller batch for faster updates
-        target_update_freq=200,     # More frequent target updates
-        update_frequency=8,         # Train every N steps (optimized)
+        buffer_size: int = 20000,
+        batch_size: int = 64,
+        target_update_freq: int = 500,
+        update_frequency: int = 4,
         board_size: int = 9,
+        per_alpha: float = 0.6,
+        per_beta_start: float = 0.4
     ):
         super().__init__(name=name, seed=seed)
         self.training_mode = training_mode
         self.episodes_trained = 0
 
-        # Hyperparameters
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
-
+        
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.update_frequency = update_frequency
-        self.learn_step = 0
-        self.step_count = 0  # Track total steps
+        self.step_count = 0
         self.board_size = board_size
+        
+        self.per_beta = per_beta_start
+        self.per_beta_increment = (1.0 - per_beta_start) / 10000
 
-        # Device selection
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Updated dimensions
-        self.state_dim = 10  # From get_representation_state
-        self.action_dim = 6  # From action_to_features
+        # Dimensions: 4 grids (MyPos, OppPos, H, V)
+        self.state_dim = 4 * board_size * board_size
+        self.action_dim = 6
 
-        self.q_network = DQN(self.state_dim, self.action_dim).to(self.device)
-        self.target_network = DQN(self.state_dim, self.action_dim).to(self.device)
+        self.q_network = DuelingDQN(self.state_dim, self.action_dim).to(self.device)
+        self.target_network = DuelingDQN(self.state_dim, self.action_dim).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
 
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=alpha, weight_decay=1e-5)
-        self.loss_fn = nn.SmoothL1Loss()  # Huber loss for stability
-
-        self.buffer = ReplayBuffer(capacity=buffer_size)
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=alpha)
+        
+        self.buffer = PrioritizedReplayBuffer(capacity=buffer_size, alpha=per_alpha)
 
         if load_path:
-            pass  # TODO: implement loading
+            self.load(load_path)
 
-    def _evaluate_actions_batch(self, state_tensor: torch.Tensor, legal_actions: List[Action], network=None) -> Tuple[List[float], Action]:
-        """Efficiently evaluate all legal actions in batch."""
+    def preprocess_state(self, env: Corridor, obs: Dict) -> Tuple[np.ndarray, bool]:
+        """
+        Returns (state_tensor, is_flipped)
+        state_tensor is flattened 4xNxN grid.
+        """
+        N = env.N
+        player = obs['to_play']
+        is_flipped = (player == 2)
+        
+        # Grids
+        my_pos_grid = np.zeros((N, N), dtype=np.float32)
+        opp_pos_grid = np.zeros((N, N), dtype=np.float32)
+        h_walls_grid = np.zeros((N, N), dtype=np.float32)
+        v_walls_grid = np.zeros((N, N), dtype=np.float32)
+        
+        p1 = obs['p1']
+        p2 = obs['p2']
+        H = env.H
+        V = env.V
+        
+        if not is_flipped:
+            my_pos_grid[p1] = 1.0
+            opp_pos_grid[p2] = 1.0
+            for (r, c) in H:
+                h_walls_grid[r, c] = 1.0
+            for (r, c) in V:
+                v_walls_grid[r, c] = 1.0
+        else:
+            # Flip perspective
+            my_r, my_c = p2
+            my_pos_grid[N - 1 - my_r, my_c] = 1.0
+            
+            opp_r, opp_c = p1
+            opp_pos_grid[N - 1 - opp_r, opp_c] = 1.0
+            
+            for (r, c) in H:
+                if 0 <= N - r - 2 < N:
+                    h_walls_grid[N - r - 2, c] = 1.0
+            
+            for (r, c) in V:
+                v_walls_grid[N - 1 - r, c] = 1.0
+                
+        state = np.stack([my_pos_grid, opp_pos_grid, h_walls_grid, v_walls_grid])
+        return (state.flatten(), is_flipped)
+
+    def approximate_q_value(self, state: np.ndarray, action: Action) -> float:
+        # Note: state here is expected to be the tensor part only
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        action_features = action_to_features(action, self.board_size)
+        action_tensor = torch.FloatTensor(action_features).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            q_value = self.q_network(state_tensor, action_tensor).item()
+        return q_value
+
+    def _evaluate_actions_batch(self, state_tensor: torch.Tensor, action_features_list: List[np.ndarray], network=None) -> Tuple[np.ndarray, int]:
         if network is None:
             network = self.q_network
             
-        # Prepare batch
-        # state_tensor is already (1, state_dim) or (state_dim,)
         if state_tensor.dim() == 1:
             state_tensor = state_tensor.unsqueeze(0)
             
-        # Repeat state for all actions
-        num_actions = len(legal_actions)
+        num_actions = len(action_features_list)
         state_batch = state_tensor.repeat(num_actions, 1)
         
-        action_batch = []
-        for action in legal_actions:
-            action_features = action_to_features(action, self.board_size)
-            action_batch.append(action_features)
-        
-        action_tensor = torch.FloatTensor(np.array(action_batch)).to(self.device)
+        action_tensor = torch.FloatTensor(np.array(action_features_list)).to(self.device)
         
         with torch.no_grad():
             q_values = network(state_batch, action_tensor).cpu().numpy()
         
         best_idx = np.argmax(q_values)
-        return q_values, legal_actions[best_idx]
+        return q_values, best_idx
 
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         legal_actions = env.legal_actions()
         if not legal_actions:
             return None
 
-        # Epsilon-greedy
         if self.training_mode and np.random.random() < self.epsilon:
             return random.choice(legal_actions)
             
-        # Get state features
-        state_tuple = get_representation_state(obs, env)
-        state_arr = state_to_tensor(state_tuple, self.board_size)
-        state_tensor = torch.FloatTensor(state_arr).to(self.device)
+        state_tensor_np, is_flipped = self.preprocess_state(env, obs)
+        state_tensor = torch.FloatTensor(state_tensor_np).to(self.device)
         
-        # Batch evaluate all legal actions
-        _, best_action = self._evaluate_actions_batch(state_tensor, legal_actions)
+        # Convert legal actions to canonical features
+        canonical_features_list = []
+        for act in legal_actions:
+            can_act = flip_action(act, self.board_size) if is_flipped else act
+            canonical_features_list.append(action_to_features(can_act, self.board_size))
         
-        return best_action
+        _, best_idx = self._evaluate_actions_batch(state_tensor, canonical_features_list)
+        
+        return legal_actions[best_idx]
 
     def update(self, state, action, reward, next_state, next_action, done, env=None, next_legal_actions=None):
-        """
-        Update DQN.
-        state: tuple (unified state)
-        next_state: tuple (unified state)
-        """
-        # Convert state tuple to tensor features
-        state_arr = state_to_tensor(state, self.board_size)
-        next_state_arr = state_to_tensor(next_state, self.board_size) if next_state else np.zeros(self.state_dim)
+        state_tensor, is_flipped = state
         
-        action_features = action_to_features(action, self.board_size)
+        # Canonical action features
+        can_action = flip_action(action, self.board_size) if is_flipped else action
+        action_features = action_to_features(can_action, self.board_size)
         
-        # Store experience
-        self.buffer.push(state_arr, action_features, reward, next_state_arr, done, next_legal_actions)
+        if next_state:
+            next_state_tensor, next_is_flipped = next_state
+        else:
+            next_state_tensor = np.zeros_like(state_tensor)
+            next_is_flipped = False
+            
+        # Canonical next legal actions
+        next_legal_features = []
+        if next_legal_actions:
+            for act in next_legal_actions:
+                c_act = flip_action(act, self.board_size) if next_is_flipped else act
+                next_legal_features.append(action_to_features(c_act, self.board_size))
+                
+        self.buffer.push(state_tensor, action_features, reward, next_state_tensor, done, next_legal_features)
         
         self.step_count += 1
+        self.per_beta = min(1.0, self.per_beta + self.per_beta_increment)
 
-        # Only train every update_frequency steps
+        if self.step_count % self.target_update_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
+
         if len(self.buffer) < self.batch_size or self.step_count % self.update_frequency != 0:
             return
         
-        batches = self.buffer.sample(self.batch_size)
+        batches, idxs, is_weights = self.buffer.sample(self.batch_size, self.per_beta)
         
-        # Prepare batch tensors
-        states = np.array([batch[0] for batch in batches], dtype=np.float32)
-        action_features = np.array([batch[1] for batch in batches], dtype=np.float32)
-        rewards = np.array([batch[2] for batch in batches], dtype=np.float32)
-        next_states = np.array([batch[3] for batch in batches], dtype=np.float32)
-        dones = np.array([batch[4] for batch in batches], dtype=np.float32)
-        next_legal_actions_list = [batch[5] for batch in batches]
+        states = np.array([b[0] for b in batches], dtype=np.float32)
+        actions = np.array([b[1] for b in batches], dtype=np.float32)
+        rewards = np.array([b[2] for b in batches], dtype=np.float32)
+        next_states = np.array([b[3] for b in batches], dtype=np.float32)
+        dones = np.array([b[4] for b in batches], dtype=np.float32)
         
-        states = torch.FloatTensor(states).to(self.device)
-        action_features = torch.FloatTensor(action_features).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        state_t = torch.FloatTensor(states).to(self.device)
+        action_t = torch.FloatTensor(actions).to(self.device)
+        reward_t = torch.FloatTensor(rewards).to(self.device)
+        next_state_t = torch.FloatTensor(next_states).to(self.device)
+        done_t = torch.FloatTensor(dones).to(self.device)
+        weights_t = torch.FloatTensor(is_weights).to(self.device)
 
-        # Current Q-values
-        q_values = self.q_network(states, action_features)
+        curr_q = self.q_network(state_t, action_t)
 
-        # Target Q-values
-        with torch.no_grad():
-            next_q_values = []
-            for i in range(self.batch_size):
-                if dones[i] == 1.0:
-                    next_q_values.append(0.0)
-                else:
-                    next_legal_actions = next_legal_actions_list[i]
-                    if next_legal_actions:
-                        q_vals, _ = self._evaluate_actions_batch(
-                            next_states[i], 
-                            next_legal_actions, 
-                            network=self.target_network
-                        )
-                        max_q = np.max(q_vals)
-                    else:
-                        max_q = 0.0
-                    next_q_values.append(max_q)
+        next_q_values = []
+        for i in range(self.batch_size):
+            if dones[i]:
+                next_q_values.append(0.0)
+                continue
             
-            next_q_values = torch.FloatTensor(next_q_values).to(self.device)
-            target = rewards + self.gamma * next_q_values * (1 - dones)
+            nl_features = batches[i][5]
+            if not nl_features:
+                next_q_values.append(0.0)
+                continue
+                
+            ns_tensor = next_state_t[i]
+            q_vals, _ = self._evaluate_actions_batch(ns_tensor, nl_features, network=self.target_network)
+            next_q_values.append(np.max(q_vals))
+            
+        next_q_t = torch.FloatTensor(next_q_values).to(self.device)
+        target_q = reward_t + (1 - done_t) * self.gamma * next_q_t
         
-        loss = self.loss_fn(q_values, target)
-
+        loss = (weights_t * (curr_q - target_q) ** 2).mean()
+        
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step()
         
-        # Update target network periodically
-        self.learn_step += 1
-        if self.learn_step % self.target_update_freq == 0:
-            self.target_network.load_state_dict(self.q_network.state_dict())
+        errors = torch.abs(curr_q - target_q).detach().cpu().numpy()
+        self.buffer.update_priorities(idxs, errors)
+
+    def load(self, path: str):
+        load_model(self, path)
 
 

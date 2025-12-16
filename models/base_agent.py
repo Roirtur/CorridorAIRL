@@ -12,6 +12,14 @@ class BaseAgent:
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         raise NotImplementedError
 
+    def preprocess_state(self, env: Corridor, obs: Dict) -> Any:
+        """
+        Preprocess the observation into a state representation.
+        By default, uses the shared get_representation_state from rl_utils.
+        """
+        from .rl_utils import get_representation_state
+        return get_representation_state(obs, env)
+
     def update(self, state, action, reward, next_state, next_action, done):
         """
         Update the agent's knowledge.

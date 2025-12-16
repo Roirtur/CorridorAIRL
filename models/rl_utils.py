@@ -165,7 +165,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         if done: return 0 # Opponent won immediately (unlikely)
 
     # Unified state for everyone
-    state = get_representation_state(obs, env)
+    state = agent.preprocess_state(env, obs)
     action = agent.select_action(env, obs)
     
     phi_s = get_shaped_reward(env, my_id)
@@ -190,7 +190,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
             return 0
         
         # 3. Prepare next step
-        next_state = get_representation_state(obs, env)
+        next_state = agent.preprocess_state(env, obs)
         next_legal_actions = env.legal_actions()
         next_action = agent.select_action(env, obs)
         

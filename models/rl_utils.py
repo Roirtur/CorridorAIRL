@@ -8,54 +8,55 @@ import numpy as np
 
 def get_representation_state(obs: Dict, env: Corridor) -> tuple:
     """
-    Unified state representation for all agents.
-    Returns a tuple: (my_r, my_c, opp_r, opp_c, my_walls, opp_walls, valid_n, valid_s, valid_w, valid_e)
+    Optimized compact state representation for Tabular RL.
+    Reduces state space by using path lengths instead of wall configurations
+    and exploiting horizontal symmetry.
     
-    This representation is:
-    1. Perspective-aligned (P2 is flipped to look like P1)
-    2. Simple (no horizontal symmetry)
-    3. Neural-network friendly (can be directly converted to tensor)
+    State Tuple:
+    (my_r, my_c, opp_r, opp_c, my_walls_bucket, opp_walls_bucket, my_path_len, opp_path_len)
     """
     N = obs['N']
     player = obs['to_play']
     
-    # 1. Player perspective (always "me" vs "opponent")
-    # We align everything so "me" starts at top (0, N//2) and goes to bottom (N-1, *)
+    # 1. Vertical Perspective Alignment (P2 -> P1 view)
     if player == 1:
         my_pos = obs['p1']
         opp_pos = obs['p2']
         my_walls = obs['walls_left'][1]
         opp_walls = obs['walls_left'][2]
+        my_id, opp_id = 1, 2
     else:
         # Flip board vertically for P2
         my_pos = (N - 1 - obs['p2'][0], obs['p2'][1])
         opp_pos = (N - 1 - obs['p1'][0], obs['p1'][1])
         my_walls = obs['walls_left'][2]
         opp_walls = obs['walls_left'][1]
+        my_id, opp_id = 2, 1
 
-    # 2. Valid moves (local view)
-    # We need to check valid moves in the *canonical* perspective
-    real_p = obs['p1'] if player == 1 else obs['p2']
-    r, c = real_p
+    # 2. Horizontal Symmetry (Force 'my_pos' to left side)
+    # If my column is > N//2, flip horizontally
+    if my_pos[1] > N // 2:
+        my_pos = (my_pos[0], N - 1 - my_pos[1])
+        opp_pos = (opp_pos[0], N - 1 - opp_pos[1])
+        # Note: We don't need to flip walls because we only track counts/buckets
+
+    # 3. Path Features (Crucial for navigation without wall map)
+    # We use the env to calculate path lengths.
+    my_path = env.shortest_path_length(my_id)
+    opp_path = env.shortest_path_length(opp_id)
     
-    # Real directions: N(-1,0), S(1,0), W(0,-1), E(0,1)
-    # env._can_step checks if the move is valid (bounds + walls)
-    # We use 1.0 for valid, 0.0 for invalid to be NN friendly
-    can_n = 1.0 if env._can_step(real_p, (r-1, c)) else 0.0
-    can_s = 1.0 if env._can_step(real_p, (r+1, c)) else 0.0
-    can_w = 1.0 if env._can_step(real_p, (r, c-1)) else 0.0
-    can_e = 1.0 if env._can_step(real_p, (r, c+1)) else 0.0
-    
-    # Transform to canonical perspective if we flipped for P2
-    if player == 2:
-        # Vertical flip: North <-> South
-        can_n, can_s = can_s, can_n
-        
+    # 4. Wall Buckets (0 or >0)
+    # Exact count matters less than "can I place a wall?"
+    my_walls_bucket = 1 if my_walls > 0 else 0
+    opp_walls_bucket = 1 if opp_walls > 0 else 0
+
     return (
-        float(my_pos[0]), float(my_pos[1]), 
-        float(opp_pos[0]), float(opp_pos[1]), 
-        float(my_walls), float(opp_walls), 
-        can_n, can_s, can_w, can_e
+        my_pos[0], my_pos[1],
+        opp_pos[0], opp_pos[1],
+        my_walls_bucket,
+        opp_walls_bucket,
+        my_path,
+        opp_path
     )
 
 def state_to_tensor(state: tuple, board_size: int) -> np.ndarray:
@@ -64,14 +65,14 @@ def state_to_tensor(state: tuple, board_size: int) -> np.ndarray:
     """
     N = float(board_size)
     # Normalize positions by N
-    # Normalize walls by 10 (max walls)
-    # Valid moves are already 0/1
+    # Wall buckets are 0/1
+    # Path lengths normalized by N*N (approx max path)
     
     return np.array([
         state[0] / N, state[1] / N,       # My Pos
         state[2] / N, state[3] / N,       # Opp Pos
-        state[4] / 10.0, state[5] / 10.0, # Walls
-        state[6], state[7], state[8], state[9] # Valid moves
+        float(state[4]), float(state[5]), # Wall Buckets
+        state[6] / (N*N), state[7] / (N*N) # Path lengths
     ], dtype=np.float32)
 
 def get_grid_state(obs: Dict, env: Corridor) -> tuple:

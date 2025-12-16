@@ -349,22 +349,47 @@ class DQNAgent(BaseAgent):
 
         curr_q = self.q_network(state_t, action_t)
 
-        next_q_values = []
+        # Vectorized next_q calculation
+        non_terminal_idxs = []
+        all_next_states = []
+        all_next_actions = []
+        action_counts = []
+        
         for i in range(self.batch_size):
             if dones[i]:
-                next_q_values.append(0.0)
                 continue
             
             nl_features = batches[i][5]
             if not nl_features:
-                next_q_values.append(0.0)
                 continue
                 
-            ns_tensor = next_state_t[i]
-            q_vals, _ = self._evaluate_actions_batch(ns_tensor, nl_features, network=self.target_network)
-            next_q_values.append(np.max(q_vals))
+            count = len(nl_features)
+            if count == 0:
+                continue
+
+            non_terminal_idxs.append(i)
+            # Repeat state 'count' times. next_state_t[i] is (C, H, W) -> (count, C, H, W)
+            all_next_states.append(next_state_t[i].unsqueeze(0).repeat(count, 1, 1, 1)) 
+            all_next_actions.append(np.array(nl_features))
+            action_counts.append(count)
+
+        next_q_values = torch.zeros(self.batch_size, device=self.device)
+        
+        if non_terminal_idxs:
+            flat_next_states = torch.cat(all_next_states, dim=0)
+            flat_next_actions = torch.FloatTensor(np.concatenate(all_next_actions, axis=0)).to(self.device)
             
-        next_q_t = torch.FloatTensor(next_q_values).to(self.device)
+            with torch.no_grad():
+                flat_q_values = self.target_network(flat_next_states, flat_next_actions)
+            
+            # Split back to samples and take max
+            per_sample_q = torch.split(flat_q_values, action_counts)
+            max_q_list = [q.max() for q in per_sample_q]
+            
+            for idx, max_q in zip(non_terminal_idxs, max_q_list):
+                next_q_values[idx] = max_q
+            
+        next_q_t = next_q_values
         target_q = reward_t + (1 - done_t) * self.gamma * next_q_t
         
         loss = (weights_t * (curr_q - target_q) ** 2).mean()

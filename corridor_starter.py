@@ -98,11 +98,14 @@ if __name__ == "__main__":
     model_path2 = "saved_models/sarsa_E5000_N5.pkl"
     sarsa = SarsaAgent(training_mode=False, load_path=model_path2)
 
-
     model_path3 = "saved_models/qlearn_E5000_N5.pkl"
     qle = SarsaAgent(training_mode=False, load_path=model_path2)
+
+
+    model_path3 = "saved_models/my_agent_E5000_N7.pkl"
+    myagent = MyAgent(training_mode=False, load_path=model_path3, board_size=7)
     
-    play_game(Corridor(N=5), GreedyPathAgent(), qle, render=True)
+    play_game(Corridor(N=7), myagent, GreedyPathAgent(), render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

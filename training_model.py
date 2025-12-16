@@ -3,13 +3,14 @@ import os
 import random
 import numpy as np
 from corridor import Corridor
-from models import SarsaAgent, GreedyPathAgent, RandomAgent, DQNAgent, QlearningAgent
+from models import SarsaAgent, GreedyPathAgent, RandomAgent, DQNAgent, QlearningAgent, MyAgent
 from models.rl_utils import run_episode, save_model, generate_save_path
 
 MODELS = {
     'sarsa': SarsaAgent,
     'dqn': DQNAgent,
-    'qlearn': QlearningAgent
+    'qlearn': QlearningAgent,
+    'my_agent': MyAgent
 }
 
 def evaluate(agent, env, adversaries, num_games=20):
@@ -20,11 +21,16 @@ def evaluate(agent, env, adversaries, num_games=20):
     
     for adv in adversaries:
         wins = 0
+        total_steps = 0
         for _ in range(num_games):
             # Evaluation runs are not training runs
-            if run_episode(env, agent, adv, training=False) == 1:
-                wins += 1
-        results[adv.name] = wins / num_games
+            win, steps = run_episode(env, agent, adv, training=False)
+            wins += win
+            total_steps += steps
+        
+        win_rate = wins / num_games
+        avg_steps = total_steps / num_games
+        results[adv.name] = {'win_rate': win_rate, 'avg_steps': avg_steps}
         
     agent.epsilon = original_epsilon
     return results
@@ -78,10 +84,11 @@ def train(agent, env, total_episodes, save_path, min_epsilon=0.1, epsilon_decay_
         # 4. Evaluate & Log
         if episode % 100 == 0:
             eval_results = evaluate(agent, env, [random_adv, greedy_adv])
-            avg_win = sum(eval_results.values()) / len(eval_results)
+            avg_win = sum(r['win_rate'] for r in eval_results.values()) / len(eval_results)
             
             print(f"Ep {episode}/{total_episodes} | Eps: {agent.epsilon:.3f} | "
-                  f"Win Rates: Random={eval_results['Random']:.2f}, Greedy={eval_results['Greedy']:.2f}")
+                  f"Win Rates: Random={eval_results['Random']['win_rate']:.2f}, Greedy={eval_results['Greedy']['win_rate']:.2f} | "
+                  f"Avg Steps: Random={eval_results['Random']['avg_steps']:.1f}, Greedy={eval_results['Greedy']['avg_steps']:.1f}")
             
             # Save if best (or just periodically)
             if episode % 500 == 0 and avg_win >= best_win_rate:
@@ -106,9 +113,9 @@ def main():
     kwargs = {
         'name': args.model.capitalize(), 
         'training_mode': True,
-        'epsilon': 1.0  # Start with full exploration
+        'epsilon': 1.0,  # Start with full exploration
     }
-    if args.model == 'dqn':
+    if args.model in ['dqn', 'my_agent'] :
         kwargs['board_size'] = args.board_size
         
     agent = agent_cls(**kwargs)

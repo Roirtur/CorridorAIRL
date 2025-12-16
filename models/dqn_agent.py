@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Tuple, List, Any
 from corridor import Corridor, Action
 from models.base_agent import BaseAgent
-from models.rl_utils import load_model
+from models.rl_utils import load_model, get_grid_state, flip_action
 import numpy as np
 import random
 from collections import deque
@@ -32,27 +32,6 @@ def action_to_features(action: Action, board_size: int) -> np.ndarray:
         features = [0.0, 1.0, r/N, c/N, is_h, is_v]
     
     return np.array(features, dtype=np.float32)
-
-def flip_action(action: Action, N: int) -> Action:
-    """
-    Flips an action from P2's perspective to P1's canonical perspective.
-    """
-    kind = action[0]
-    if kind == "M":
-        _, (r, c) = action
-        return ("M", (N - 1 - r, c))
-    elif kind == "W":
-        _, (r, c, ori) = action
-        if ori == "H":
-            # H wall at r blocks r, r+1.
-            # Flipped blocks N-1-r, N-r-2.
-            # Wall at k blocks k, k+1. So k = N-r-2.
-            return ("W", (N - r - 2, c, "H"))
-        else:
-            # V wall at r blocks r, r (col c, c+1).
-            # Flipped blocks N-1-r.
-            return ("W", (N - 1 - r, c, "V"))
-    return action
 
 # -------------------------------------------------------------------
 # Prioritized Experience Replay (SumTree + Buffer)
@@ -158,16 +137,22 @@ class PrioritizedReplayBuffer:
 # -------------------------------------------------------------------
 
 class DuelingDQN(nn.Module):
-    def __init__(self, state_dim: int, action_dim: int):
+    def __init__(self, input_channels: int, action_dim: int, board_size: int = 9):
         super(DuelingDQN, self).__init__()
         
-        # Feature extractors
-        self.state_encoder = nn.Sequential(
-            nn.Linear(state_dim, 256),
+        # CNN Feature Extractor
+        self.conv_net = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU()
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten()
         )
+        
+        # Calculate flattened size: 64 * N * N
+        self.flatten_dim = 64 * board_size * board_size
         
         self.action_encoder = nn.Sequential(
             nn.Linear(action_dim, 64),
@@ -176,20 +161,23 @@ class DuelingDQN(nn.Module):
 
         # Value Stream: V(s)
         self.value_stream = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Linear(self.flatten_dim, 128),
             nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(128, 1)
         )
 
         # Advantage Stream: A(s, a)
         self.advantage_stream = nn.Sequential(
-            nn.Linear(128 + 64, 128),
+            nn.Linear(self.flatten_dim + 64, 128),
             nn.ReLU(),
             nn.Linear(128, 1)
         )
 
     def forward(self, state, action):
-        s_feat = self.state_encoder(state)
+        # state: (B, C, H, W)
+        # action: (B, ActionDim)
+        
+        s_feat = self.conv_net(state)
         a_feat = self.action_encoder(action)
         
         val = self.value_stream(s_feat)
@@ -242,11 +230,11 @@ class DQNAgent(BaseAgent):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Dimensions: 4 grids (MyPos, OppPos, H, V)
-        self.state_dim = 4 * board_size * board_size
+        self.input_channels = 4
         self.action_dim = 6
 
-        self.q_network = DuelingDQN(self.state_dim, self.action_dim).to(self.device)
-        self.target_network = DuelingDQN(self.state_dim, self.action_dim).to(self.device)
+        self.q_network = DuelingDQN(self.input_channels, self.action_dim, board_size).to(self.device)
+        self.target_network = DuelingDQN(self.input_channels, self.action_dim, board_size).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
 
@@ -260,47 +248,9 @@ class DQNAgent(BaseAgent):
     def preprocess_state(self, env: Corridor, obs: Dict) -> Tuple[np.ndarray, bool]:
         """
         Returns (state_tensor, is_flipped)
-        state_tensor is flattened 4xNxN grid.
+        state_tensor is (4, N, N) grid.
         """
-        N = env.N
-        player = obs['to_play']
-        is_flipped = (player == 2)
-        
-        # Grids
-        my_pos_grid = np.zeros((N, N), dtype=np.float32)
-        opp_pos_grid = np.zeros((N, N), dtype=np.float32)
-        h_walls_grid = np.zeros((N, N), dtype=np.float32)
-        v_walls_grid = np.zeros((N, N), dtype=np.float32)
-        
-        p1 = obs['p1']
-        p2 = obs['p2']
-        H = env.H
-        V = env.V
-        
-        if not is_flipped:
-            my_pos_grid[p1] = 1.0
-            opp_pos_grid[p2] = 1.0
-            for (r, c) in H:
-                h_walls_grid[r, c] = 1.0
-            for (r, c) in V:
-                v_walls_grid[r, c] = 1.0
-        else:
-            # Flip perspective
-            my_r, my_c = p2
-            my_pos_grid[N - 1 - my_r, my_c] = 1.0
-            
-            opp_r, opp_c = p1
-            opp_pos_grid[N - 1 - opp_r, opp_c] = 1.0
-            
-            for (r, c) in H:
-                if 0 <= N - r - 2 < N:
-                    h_walls_grid[N - r - 2, c] = 1.0
-            
-            for (r, c) in V:
-                v_walls_grid[N - 1 - r, c] = 1.0
-                
-        state = np.stack([my_pos_grid, opp_pos_grid, h_walls_grid, v_walls_grid])
-        return (state.flatten(), is_flipped)
+        return get_grid_state(obs, env)
 
     def approximate_q_value(self, state: np.ndarray, action: Action) -> float:
         # Note: state here is expected to be the tensor part only
@@ -316,11 +266,11 @@ class DQNAgent(BaseAgent):
         if network is None:
             network = self.q_network
             
-        if state_tensor.dim() == 1:
+        if state_tensor.dim() == 3:
             state_tensor = state_tensor.unsqueeze(0)
             
         num_actions = len(action_features_list)
-        state_batch = state_tensor.repeat(num_actions, 1)
+        state_batch = state_tensor.repeat(num_actions, 1, 1, 1)
         
         action_tensor = torch.FloatTensor(np.array(action_features_list)).to(self.device)
         

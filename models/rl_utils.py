@@ -1,7 +1,7 @@
 import os
 import pickle
 import random
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, Any, List, Union, Tuple
 from corridor import Corridor, Action
 from .base_agent import BaseAgent
 import numpy as np
@@ -73,6 +73,77 @@ def state_to_tensor(state: tuple, board_size: int) -> np.ndarray:
         state[4] / 10.0, state[5] / 10.0, # Walls
         state[6], state[7], state[8], state[9] # Valid moves
     ], dtype=np.float32)
+
+def get_grid_state(obs: Dict, env: Corridor) -> tuple:
+    """
+    Returns (state_tensor, is_flipped)
+    state_tensor is a (4, N, N) numpy array.
+    Channels:
+    0: My Position (1.0 at pos)
+    1: Opponent Position (1.0 at pos)
+    2: Horizontal Walls (1.0 where wall exists)
+    3: Vertical Walls (1.0 where wall exists)
+    """
+    N = env.N
+    player = obs['to_play']
+    is_flipped = (player == 2)
+    
+    # Grids
+    my_pos_grid = np.zeros((N, N), dtype=np.float32)
+    opp_pos_grid = np.zeros((N, N), dtype=np.float32)
+    h_walls_grid = np.zeros((N, N), dtype=np.float32)
+    v_walls_grid = np.zeros((N, N), dtype=np.float32)
+    
+    p1 = obs['p1']
+    p2 = obs['p2']
+    H = env.H
+    V = env.V
+    
+    if not is_flipped:
+        my_pos_grid[p1] = 1.0
+        opp_pos_grid[p2] = 1.0
+        for (r, c) in H:
+            h_walls_grid[r, c] = 1.0
+        for (r, c) in V:
+            v_walls_grid[r, c] = 1.0
+    else:
+        # Flip perspective
+        my_r, my_c = p2
+        my_pos_grid[N - 1 - my_r, my_c] = 1.0
+        
+        opp_r, opp_c = p1
+        opp_pos_grid[N - 1 - opp_r, opp_c] = 1.0
+        
+        for (r, c) in H:
+            if 0 <= N - r - 2 < N:
+                h_walls_grid[N - r - 2, c] = 1.0
+        
+        for (r, c) in V:
+            v_walls_grid[N - 1 - r, c] = 1.0
+            
+    state = np.stack([my_pos_grid, opp_pos_grid, h_walls_grid, v_walls_grid])
+    return (state, is_flipped)
+
+def flip_action(action: Action, N: int) -> Action:
+    """
+    Flips an action from P2's perspective to P1's canonical perspective.
+    """
+    kind = action[0]
+    if kind == "M":
+        _, (r, c) = action
+        return ("M", (N - 1 - r, c))
+    elif kind == "W":
+        _, (r, c, ori) = action
+        if ori == "H":
+            # H wall at r blocks r, r+1.
+            # Flipped blocks N-1-r, N-r-2.
+            # Wall at k blocks k, k+1. So k = N-r-2.
+            return ("W", (N - r - 2, c, "H"))
+        else:
+            # V wall at r blocks r, r (col c, c+1).
+            # Flipped blocks N-1-r.
+            return ("W", (N - 1 - r, c, "V"))
+    return action
 
 def get_shaped_reward(env: Corridor, my_id: int) -> float:
     """
@@ -148,10 +219,10 @@ def load_model(agent: Any, path: str):
     print(f"  Board Size: {data.get('board_size')}")
     print(f"  Adversary: {data.get('adversary')}")
 
-def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool = True) -> int:
+def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool = True) -> Tuple[int, int]:
     """
     Runs a single episode.
-    Returns 1 if agent wins, 0 otherwise.
+    Returns (win_status, steps).
     """
     obs = env.reset()
     
@@ -162,7 +233,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
     if my_id == 2:
         opp_action = adversary.select_action(env, obs)
         obs, _, done, info = env.step(opp_action)
-        if done: return 0 # Opponent won immediately (unlikely)
+        if done: return 0, env.move_count # Opponent won immediately (unlikely)
 
     # Unified state for everyone
     state = agent.preprocess_state(env, obs)
@@ -178,7 +249,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         if done:
             if training:
                 agent.update(state, action, 1.0, None, None, True, env=None, next_legal_actions=None)
-            return 1
+            return 1, env.move_count
         
         # 2. Opponent's turn
         opp_action = adversary.select_action(env, obs)
@@ -187,7 +258,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         if done:
             if training:
                 agent.update(state, action, -1.0, None, None, True, env=None, next_legal_actions=None)
-            return 0
+            return 0, env.move_count
         
         # 3. Prepare next step
         next_state = agent.preprocess_state(env, obs)
@@ -204,7 +275,7 @@ def run_episode(env: Corridor, agent: Any, adversary: BaseAgent, training: bool 
         state = next_state
         action = next_action
         
-    return 0
+    return 0, env.move_count
 
 def train_loop(agent: Any, env: Corridor, adversaries: Union[List[BaseAgent], BaseAgent], episodes: int, save_path: Optional[str] = None, start_epsilon: float = 1.0, end_epsilon: float = 0.1, alpha: float = 0.1, gamma: float = 0.995, epsilon_decay: Optional[float] = None):
     """
@@ -232,7 +303,7 @@ def train_loop(agent: Any, env: Corridor, adversaries: Union[List[BaseAgent], Ba
     
     for episode in range(1, episodes + 1):
         adversary = random.choice(adversaries)
-        win = run_episode(env, agent, adversary, training=True)
+        win, _ = run_episode(env, agent, adversary, training=True)
         wins += win
         
         # Decay epsilon

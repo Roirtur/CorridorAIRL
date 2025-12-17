@@ -1,4 +1,5 @@
 import random
+import math
 from typing import List, Tuple
 from corridor import Corridor
 from models.base_agent import BaseAgent
@@ -11,7 +12,8 @@ def tabular_training_loop(
     save_path_model: str,
     save_path_data: str,
     eval_interval: int = 50,
-    save_interval: int = 250
+    save_interval: int = 250,
+    min_epsilon: float = 0.1
 ):
     """
     Training loop with curriculum learning.
@@ -32,6 +34,13 @@ def tabular_training_loop(
         phase_rewards = []
         
         for i in range(n_episodes):
+            # cosine (slow start, fast end)
+            # resets at each curriculum phase to allow exploration against new opponent
+            if hasattr(agent, "epsilon"):
+                progress = i / n_episodes
+                decayed_epsilon = math.cos(progress * math.pi / 2)
+                agent.epsilon = max(min_epsilon, decayed_epsilon)
+
             agent_player = 1 if random.random() < 0.5 else 2
             
             stats = agent.run_episode(env, opponent, agent_player=agent_player)

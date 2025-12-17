@@ -10,7 +10,6 @@ class QlearningAgent(BaseAgent):
     """Q-learning Agent"""
     def __init__(
         self, 
-        min_epsilon: float = 0.01,
         name: str = "Q-learn", 
         seed: int | None = None,
         alpha: float = 0.05,
@@ -24,7 +23,6 @@ class QlearningAgent(BaseAgent):
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
-        self.min_epsilon = min_epsilon
         
         self.q_table = defaultdict(float)
         
@@ -45,16 +43,16 @@ class QlearningAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # normalized state
-        state_features = tabular_state_representation(obs, env)
+        state_features = tabular_state_representation(obs)
 
         # choose action with highest Q-value
         q_values = [self.q_table[(state_features, action)] for action in legal_actions]
         max_q = max(q_values)
         best_actions = [action for action, q in zip(legal_actions, q_values) if q == max_q]
         
-        return best_actions[0]
+        return random.choice(best_actions)
 
-    def update(self, state, action, reward, next_state, next_legal_actions, done):
+    def update(self, state, action, reward, next_state, done, next_legal_actions):
         current_q = self.q_table[(state, action)]
         
         if done or next_state is None or next_legal_actions is None:
@@ -64,3 +62,89 @@ class QlearningAgent(BaseAgent):
             target = reward + self.gamma * max(next_q_values) if next_q_values else reward
         
         self.q_table[(state, action)] += self.alpha * (target - current_q)
+
+    def run_episode(
+        self,
+        env: Corridor,
+        opponent: BaseAgent, 
+        agent_player: int = 1,
+        max_steps: int = 500
+    ) -> Dict:
+        """
+        Runs a single episode for Qlearning agent.
+        """
+        obs = env.reset()
+        
+        episode_reward = 0
+        steps = 0
+
+        # Previous state/action
+        prev_state = None
+        prev_action = None
+
+        while steps < max_steps:
+            current_player = obs["to_play"]
+            
+            if current_player == agent_player:
+                agent = self
+                is_learning = True
+            else:
+                agent = opponent
+                is_learning = False
+
+            # get state and legal actions
+            current_legal_actions = env.legal_actions()
+            current_state = tabular_state_representation(obs)
+            
+            action = agent.select_action(env, obs)
+            
+            # execute action
+            next_obs, _, done, info = env.step(action)
+            
+            if is_learning:
+                reward = -0.01  # Small constant step penalty
+                
+                if prev_state is not None:
+                    self.update(
+                        prev_state,
+                        prev_action,
+                        reward,
+                        current_state,
+                        False,
+                        current_legal_actions
+                    )
+                
+                episode_reward += reward
+                
+                prev_state = current_state
+                prev_action = action
+
+            if done:
+                if prev_state is not None:
+                    winner = info.get("winner")
+                    if winner == agent_player:
+                        final_reward = 1.0
+                    elif winner is None:
+                        final_reward = -0.5 # Draw
+                    else:
+                        final_reward = -1.0 # Loss
+                    
+                    self.update(
+                        prev_state,
+                        prev_action,
+                        final_reward,
+                        None,
+                        True,
+                        None
+                    )
+                    
+                    episode_reward += final_reward
+                break
+            
+            obs = next_obs
+            steps += 1
+        
+        return {
+            "reward": episode_reward,
+            "steps": steps
+        }

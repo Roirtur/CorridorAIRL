@@ -11,7 +11,6 @@ def tabular_state_representation(obs: Dict):
         # Ignores wall positions for now to simplify
         # obs["H"],
         # obs["V"],
-        obs["move_count"]
     )
 
     return state

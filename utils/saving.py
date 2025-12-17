@@ -52,5 +52,15 @@ def load_training_data(path: str) -> Dict[str, List[float]]:
     with open(path, 'r') as f:
         return json.load(f)
     
-def generate_path_name():
-    pass
+def generate_path_name(agent_name: str, total_episodes: int, opponent_name: str, file_type: str) -> str:
+    """
+    Generates a filename with format {model name}_E{number episode}_VS{opponent}.{pkl|json}
+    """
+    ext = "pkl" if file_type == "model" else "json"
+    folder = "saved_models"
+    
+    # Ensure directory exists
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+        
+    return os.path.join(folder, f"{agent_name}_E{total_episodes}_VS{opponent_name}.{ext}")

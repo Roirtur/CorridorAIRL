@@ -3,7 +3,7 @@ from typing import Dict, Optional
 import random
 from collections import defaultdict
 
-from models.base_agent import BaseAgent
+from models import BaseAgent
 from utils.representation import tabular_state_representation
 
 class SarsaAgent(BaseAgent):

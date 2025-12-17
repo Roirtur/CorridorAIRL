@@ -2,7 +2,7 @@ import random
 import math
 from typing import List, Tuple
 from corridor import Corridor
-from models.base_agent import BaseAgent
+from models import BaseAgent
 from utils.saving import save_tabular_model, save_training_data
 
 def tabular_training_loop(

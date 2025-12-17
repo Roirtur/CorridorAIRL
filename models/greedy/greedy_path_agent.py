@@ -1,7 +1,7 @@
 import random
 from typing import Dict, Tuple
 from corridor import Corridor, Action
-from models.base_agent import BaseAgent
+from models import BaseAgent
 
 class GreedyPathAgent(BaseAgent):
     """

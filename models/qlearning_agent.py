@@ -82,9 +82,7 @@ class QlearningAgent(BaseAgent):
         else:
             # Compute max over legal actions only
             if next_legal_actions is None:
-                # Fallback: assume all actions are possible (suboptimal)
-                next_q_values = list(self.q_table.values()) if self.q_table else [0.0]
-                target = reward + self.gamma * max(next_q_values)
+                target = reward
             else:
                 # Proper Q-learning: max over legal actions
                 next_q_values = [self.q_table[(next_state, a)] for a in next_legal_actions]

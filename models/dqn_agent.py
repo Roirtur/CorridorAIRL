@@ -108,16 +108,21 @@ class DQNAgent(BaseAgent):
             return random.choice(legal_actions)
             
         state_tensor_np, is_flipped = self.preprocess_state(env, obs)
-        state_tensor = torch.FloatTensor(state_tensor_np).to(self.device)
+        state_tensor = torch.FloatTensor(state_tensor_np).unsqueeze(0).to(self.device)
         
-        # Convert legal actions to canonical features
+        # Efficient single-pass evaluation
         canonical_features_list = []
         for act in legal_actions:
             can_act = flip_action(act, self.board_size) if is_flipped else act
             canonical_features_list.append(action_to_features(can_act, self.board_size))
         
-        _, best_idx = self._evaluate_actions_batch(state_tensor, canonical_features_list)
+        action_tensor = torch.FloatTensor(np.array(canonical_features_list)).to(self.device)
+        state_batch = state_tensor.repeat(len(legal_actions), 1, 1, 1)
         
+        with torch.no_grad():
+            q_values = self.q_network(state_batch, action_tensor).cpu().numpy()
+        
+        best_idx = np.argmax(q_values)
         return legal_actions[best_idx]
 
     def update(self, state, action, reward, next_state, next_action, done, env=None, next_legal_actions=None):

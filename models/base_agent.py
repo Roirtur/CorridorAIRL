@@ -18,7 +18,7 @@ class BaseAgent:
         env: Corridor,
         opponent,
         agent_player: int = 1,
-        max_steps: int = 500
+        max_steps: int = 150
     ):
         raise NotImplementedError
 

@@ -68,7 +68,7 @@ class SarsaAgent(BaseAgent):
         env: Corridor,
         opponent: BaseAgent,
         agent_player: int = 1,
-        max_steps: int = 500
+        max_steps: int = 150
     ) -> Dict:
         """
         Run one SARSA training episode

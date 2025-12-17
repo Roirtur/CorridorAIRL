@@ -1,9 +1,8 @@
 import random
 from typing import Dict, Tuple
 from corridor import Corridor, Action
-from .base_agent import BaseAgent
+from models.base_agent import BaseAgent
 
-# Optionnel : exemple d'agent très simple basé sur une heuristique
 class GreedyPathAgent(BaseAgent):
     """
     Heuristique: privilégie les déplacements qui rapprochent le pion de sa ligne but.
@@ -37,4 +36,3 @@ class GreedyPathAgent(BaseAgent):
                 return random.choice([("W", w) for (_, w) in wall_actions])
 
         return ("M", best[1])
-

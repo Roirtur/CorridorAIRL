@@ -1,9 +1,7 @@
-from .base_agent import BaseAgent
-from .greedy_path_agent import GreedyPathAgent
-from .random_agent import RandomAgent
-from .my_agent import MyAgent
-from .sarsa_agent import SarsaAgent
-from .qlearning_agent import QlearningAgent
-from .dqn_agent import DQNAgent
+from base_agent import BaseAgent
+from greedy.greedy_path_agent import GreedyPathAgent
+from qlearning.qlearning_agent import QlearningAgent
+from random.random_agent import RandomAgent
+from sarsa.sarsa_agent import SarsaAgent
 
-__all__ = ['BaseAgent', 'GreedyPathAgent', 'RandomAgent', 'MyAgent', 'SarsaAgent', 'QlearningAgent', 'DQNAgent']
+__all__ = ['BaseAgent','GreedyPathAgent' ,'QlearningAgent' ,'RandomAgent' ,'SarsaAgent']

@@ -1,7 +1,7 @@
-from corridor import Corridor, Action
-from typing import Dict, Optional, Any, List, Union
-import random
+from random import random
+from typing import Dict
 
+from corridor import Action, Corridor
 class BaseAgent:
     """Interface minimale : implémente select_action(env, obs)."""
     def __init__(self, name: str = "BaseAgent", seed: int | None = None):
@@ -11,40 +11,3 @@ class BaseAgent:
 
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         raise NotImplementedError
-
-    def preprocess_state(self, env: Corridor, obs: Dict) -> Any:
-        """
-        Preprocess the observation into a state representation.
-        By default, uses the shared get_representation_state from rl_utils.
-        """
-        from .rl_utils import get_representation_state
-        return get_representation_state(obs, env)
-
-    def update(self, state, action, reward, next_state, next_action, done):
-        """
-        Update the agent's knowledge.
-        """
-        pass
-
-    def train(self, env: Corridor, adversaries: Union[List['BaseAgent'], 'BaseAgent'], num_episodes: int, save_path: Optional[str] = None, start_epsilon: float = 1.0, end_epsilon: float = 0.1, alpha: float = 0.1, gamma: float = 0.995, epsilon_decay: Optional[float] = None):
-        """
-        Train the agent against an adversary using the shared training loop.
-        """
-        from .rl_utils import train_loop
-        train_loop(self, env, adversaries, num_episodes, save_path, start_epsilon, end_epsilon, alpha, gamma, epsilon_decay)
-
-    def save(self, path: str, env: Corridor, adversary: 'BaseAgent'):
-        """
-        Save the agent's model.
-        """
-        from .rl_utils import save_model
-        # Assuming the agent tracks episodes_trained, otherwise 0
-        episodes = getattr(self, 'episodes_trained', 0)
-        save_model(self, path, env, adversary.name, episodes)
-
-    def load(self, path: str):
-        """
-        Load the agent's model.
-        """
-        from .rl_utils import load_model
-        load_model(self, path)

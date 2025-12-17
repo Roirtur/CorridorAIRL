@@ -1,15 +1,7 @@
 from typing import List
-from corridor import Corridor
-
-# =======================
-# 1) Interface d'agent
-# =======================
+from corridor import Corridor, Action
 
 from models import *
-
-# =======================
-# 2) Boucle de partie
-# =======================
 
 def play_game(env: Corridor, agent1: BaseAgent, agent2: BaseAgent, render: bool = False, max_moves: int = 500) -> dict:
     obs = env.reset()
@@ -49,8 +41,7 @@ def play_game(env: Corridor, agent1: BaseAgent, agent2: BaseAgent, render: bool 
 
 
 def evaluate(n_games: int = 50, render: bool = False):
-    env = Corridor(N=5)
-    # env = Corridor(N=9, walls_per_player=10)
+    env = Corridor(N=9, walls_per_player=10)
 
     # Remplace RandomAgent par votre agent :
     agent1 = RandomAgent(name="Random-1", seed=123)
@@ -89,23 +80,7 @@ def evaluate(n_games: int = 50, render: bool = False):
 
 if __name__ == "__main__":
     # Lancer une partie unique avec rendu:
-    # Try to load trained model if available
-    # We look for the curriculum trained model on 5x5 board
-    model_path = "saved_models/dqn_E5000_N5.pkl"
-    
-    dqn = DQNAgent(training_mode=False, load_path=model_path, board_size=5)
-
-    model_path2 = "saved_models/sarsa_E5000_N5.pkl"
-    sarsa = SarsaAgent(training_mode=False, load_path=model_path2)
-
-    model_path3 = "saved_models/qlearn_E5000_N5.pkl"
-    qle = SarsaAgent(training_mode=False, load_path=model_path2)
-
-
-    model_path3 = "saved_models/my_agent_E5000_N7.pkl"
-    myagent = MyAgent(training_mode=False, load_path=model_path3, board_size=7)
-    
-    play_game(Corridor(N=7), myagent, GreedyPathAgent(), render=True)
+    play_game(Corridor(), RandomAgent(), RandomAgent(), render=True)
 
     # Lancer une évaluation
     # evaluate(n_games=20, render=False)

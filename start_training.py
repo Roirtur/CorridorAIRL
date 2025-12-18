@@ -1,3 +1,5 @@
+# Made with AI to fasten the task
+
 import os
 from corridor import Corridor
 from models import QlearningAgent
@@ -93,8 +95,8 @@ def main():
         agent = SarsaAgent(name=agent_name)
         
     # Generate Paths
-    model_path = generate_path_name(agent_name, episodes, opponent_str, "model")
-    data_path = generate_path_name(agent_name, episodes, opponent_str, "data")
+    model_path = generate_path_name(agent_name, episodes, opponent_str, "model", board_size)
+    data_path = generate_path_name(agent_name, episodes, opponent_str, "data", board_size)
     
     print(f"\n=== Starting Training ===")
     print(f"Agent: {agent.name} ({agent_type})")

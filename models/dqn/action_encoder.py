@@ -31,15 +31,6 @@ class ActionEncoder:
     def encode(self, action: Action) -> int:
         """
         Converts a Corridor action to a neural network index.
-        
-        Args:
-            action: Corridor action tuple
-                - ("M", (r, c)) for move
-                - ("W", (r, c, "H")) for horizontal wall
-                - ("W", (r, c, "V")) for vertical wall
-        
-        Returns:
-            Integer index in [0, action_space_size-1]
         """
         action_type = action[0]
         
@@ -60,13 +51,7 @@ class ActionEncoder:
     
     def decode(self, action_idx: int) -> Action:
         """
-        Converts a neural network index back to a Corridor action.
-        
-        Args:
-            action_idx: Integer index from neural network output
-        
-        Returns:
-            Corridor action tuple
+        Converts a neural network output back to a Corridor action.
         """
         if action_idx < 0 or action_idx >= self.action_space_size:
             raise ValueError(f"Action index {action_idx} out of bounds [0, {self.action_space_size})")
@@ -95,12 +80,6 @@ class ActionEncoder:
     def encode_legal_actions(self, legal_actions: List[Action]) -> List[int]:
         """
         Encodes a list of legal actions to their indices.
-        
-        Args:
-            legal_actions: List of Corridor legal actions
-        
-        Returns:
-            List of action indices
         """
         return [self.encode(action) for action in legal_actions]
     
@@ -108,12 +87,6 @@ class ActionEncoder:
         """
         Creates a boolean mask for legal actions.
         Useful for masking illegal actions in neural network output.
-        
-        Args:
-            legal_actions: List of Corridor legal actions
-        
-        Returns:
-            Boolean list of length action_space_size, True for legal actions
         """
         mask = [False] * self.action_space_size
         for action in legal_actions:
@@ -124,13 +97,6 @@ class ActionEncoder:
     def filter_legal_actions(self, q_values: List[float], legal_actions: List[Action]) -> Tuple[int, Action]:
         """
         Selects the best legal action from Q-values.
-        
-        Args:
-            q_values: Q-values from neural network (length action_space_size)
-            legal_actions: List of legal Corridor actions
-        
-        Returns:
-            Tuple of (best_action_index, best_corridor_action)
         """
         if not legal_actions:
             raise ValueError("No legal actions available")
@@ -141,20 +107,8 @@ class ActionEncoder:
         legal_q_values = [(q_values[idx], idx) for idx in legal_indices]
         
         # Select action with highest Q-value
-        best_q, best_idx = max(legal_q_values, key=lambda x: x[0])
+        _, best_idx = max(legal_q_values, key=lambda x: x[0])
         
         best_action = self.decode(best_idx)
         
         return best_idx, best_action
-
-
-# Convenience functions for backward compatibility
-def encode_action(action: Action, board_size: int = 9) -> int:
-    """Encodes a single action (functional interface)."""
-    encoder = ActionEncoder(board_size)
-    return encoder.encode(action)
-
-def decode_action(action_idx: int, board_size: int = 9) -> Action:
-    """Decodes a single action index (functional interface)."""
-    encoder = ActionEncoder(board_size)
-    return encoder.decode(action_idx)

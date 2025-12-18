@@ -64,3 +64,10 @@ def generate_path_name(agent_name: str, total_episodes: int, opponent_name: str,
         os.makedirs(folder)
         
     return os.path.join(folder, f"{agent_name}_E{total_episodes}_VS{opponent_name}.{ext}")
+
+def save_approximation_function_model():
+    raise NotImplementedError
+
+
+def load_approximation_function_model():
+    raise NotImplementedError

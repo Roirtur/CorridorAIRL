@@ -1,5 +1,5 @@
 # Trained models
-saved_models/*.pkl
+saved_models/*
 saved_models/
 
 # Byte-compiled / optimized / DLL files

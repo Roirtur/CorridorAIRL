@@ -46,8 +46,8 @@ class DQNAgent(BaseAgent):
         # Action encoder for Corridor actions
         self.action_encoder = ActionEncoder(board_size=board_size)
         
-        # State dimension: N*N*6 (6 feature planes)
-        self.state_dim = board_size * board_size * 6
+        # State shape: (6, N, N) - 6 feature planes in channels-first format
+        self.state_shape = (6, board_size, board_size)
         self.action_dim = self.action_encoder.action_space_size
 
         # Device selection (CUDA if available)

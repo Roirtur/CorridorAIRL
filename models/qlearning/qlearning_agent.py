@@ -68,7 +68,7 @@ class QlearningAgent(BaseAgent):
         env: Corridor,
         opponent: BaseAgent, 
         agent_player: int = 1,
-        max_steps: int = 500
+        max_steps: int = 250
     ) -> Dict:
         """
         Runs a single episode for Qlearning agent.
@@ -148,3 +148,13 @@ class QlearningAgent(BaseAgent):
             "reward": episode_reward,
             "steps": steps
         }
+
+    def save(self, path: str):
+        """Save Q-table to file using utility function."""
+        from utils.saving import save_tabular_model
+        save_tabular_model(self, path)
+
+    def load(self, path: str):
+        """Load Q-table from file using utility function."""
+        from utils.saving import load_tabular_model
+        load_tabular_model(self, path)

@@ -52,9 +52,10 @@ def load_training_data(path: str) -> Dict[str, List[float]]:
     with open(path, 'r') as f:
         return json.load(f)
     
-def generate_path_name(agent_name: str, total_episodes: int, opponent_name: str, file_type: str) -> str:
+def generate_path_name(agent_name: str, total_episodes: int, opponent_name: str, file_type: str, board_size: int = None) -> str:
     """
-    Generates a filename with format {model name}_E{number episode}_VS{opponent}.{pkl|json}
+    Generates a filename with format {model name}_B{board_size}_E{number episode}_VS{opponent}.{pkl|json}
+    If board_size is provided, it's included in the filename.
     """
     ext = "pkl" if file_type == "model" else "json"
     folder = "saved_models"
@@ -62,5 +63,67 @@ def generate_path_name(agent_name: str, total_episodes: int, opponent_name: str,
     # Ensure directory exists
     if not os.path.exists(folder):
         os.makedirs(folder)
+    
+    # Include board size if provided
+    if board_size:
+        filename = f"{agent_name}_B{board_size}_E{total_episodes}_VS{opponent_name}.{ext}"
+    else:
+        filename = f"{agent_name}_E{total_episodes}_VS{opponent_name}.{ext}"
         
-    return os.path.join(folder, f"{agent_name}_E{total_episodes}_VS{opponent_name}.{ext}")
+    return os.path.join(folder, filename)
+
+def parse_model_info(filename: str) -> dict:
+    """
+    Parses model filename to extract agent type, board size, episodes, and opponent.
+    Expected format: {agent_name}_B{board_size}_E{episodes}_VS{opponent}.pkl
+    or: {agent_name}_E{episodes}_VS{opponent}.pkl (legacy format without board size)
+    """
+    import re
+    
+    # Remove extension
+    name = os.path.splitext(os.path.basename(filename))[0]
+    
+    # Try to parse with board size
+    pattern_with_board = r'^(.+?)_B(\d+)_E(\d+)_VS(.+)$'
+    match = re.match(pattern_with_board, name)
+    
+    if match:
+        return {
+            'agent_name': match.group(1),
+            'board_size': int(match.group(2)),
+            'episodes': int(match.group(3)),
+            'opponent': match.group(4)
+        }
+    
+    # Try legacy format without board size
+    pattern_legacy = r'^(.+?)_E(\d+)_VS(.+)$'
+    match = re.match(pattern_legacy, name)
+    
+    if match:
+        return {
+            'agent_name': match.group(1),
+            'board_size': None,
+            'episodes': int(match.group(2)),
+            'opponent': match.group(3)
+        }
+    
+    # Could not parse, return minimal info
+    return {
+        'agent_name': name,
+        'board_size': None,
+        'episodes': None,
+        'opponent': None
+    }
+
+
+def save_approximation_agent_model(agent, path: str):
+    """
+    Saves the NN weights of an agent to a ... file
+    """
+    raise NotImplementedError
+
+def load_approximation_agent_model(agent, path: str):
+    """
+    Loads the NN weights into an agent from a ... file
+    """
+    raise NotImplementedError

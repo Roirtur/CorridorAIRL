@@ -57,21 +57,18 @@ class ActionEncoder:
             raise ValueError(f"Action index {action_idx} out of bounds [0, {self.action_space_size})")
         
         if action_idx < self.move_actions_end:
-            # Move action
             idx = action_idx - self.move_actions_start
             r = idx // self.N
             c = idx % self.N
             return ("M", (r, c))
         
         elif action_idx < self.h_wall_end:
-            # Horizontal wall
             idx = action_idx - self.h_wall_start
             r = idx // (self.N - 1)
             c = idx % (self.N - 1)
             return ("W", (r, c, "H"))
         
         else:
-            # Vertical wall
             idx = action_idx - self.v_wall_start
             r = idx // (self.N - 1)
             c = idx % (self.N - 1)
@@ -86,7 +83,6 @@ class ActionEncoder:
     def get_legal_action_mask(self, legal_actions: List[Action]) -> List[bool]:
         """
         Creates a boolean mask for legal actions.
-        Useful for masking illegal actions in neural network output.
         """
         mask = [False] * self.action_space_size
         for action in legal_actions:
@@ -103,10 +99,8 @@ class ActionEncoder:
         
         legal_indices = self.encode_legal_actions(legal_actions)
         
-        # Filter Q-values to only legal actions
         legal_q_values = [(q_values[idx], idx) for idx in legal_indices]
         
-        # Select action with highest Q-value
         _, best_idx = max(legal_q_values, key=lambda x: x[0])
         
         best_action = self.decode(best_idx)

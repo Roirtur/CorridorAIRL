@@ -91,3 +91,12 @@ class DQNAgent(BaseAgent):
         """Run one training episode."""
         raise NotImplementedError
 
+    def save(self, path: str):
+        """Save NN weights to file."""
+        from utils.saving import save_approximation_agent_model
+        save_approximation_agent_model(self, path)
+
+    def load(self, path: str):
+        """Load NN weights from file."""
+        from utils.saving import load_approximation_agent_model
+        load_approximation_agent_model(self, path)

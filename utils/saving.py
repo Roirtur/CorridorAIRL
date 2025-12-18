@@ -114,3 +114,16 @@ def parse_model_info(filename: str) -> dict:
         'episodes': None,
         'opponent': None
     }
+
+
+def save_approximation_agent_model(agent, path: str):
+    """
+    Saves the NN weights of an agent to a ... file
+    """
+    raise NotImplementedError
+
+def load_approximation_agent_model(agent, path: str):
+    """
+    Loads the NN weights into an agent from a ... file
+    """
+    raise NotImplementedError

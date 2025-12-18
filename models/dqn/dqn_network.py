@@ -39,12 +39,11 @@ class DQN(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
     
     def forward(self, x):
-        # Convolutional feature extraction
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
         
-        # Flatten for fully connected layers
+        # flatten
         batch_size = x.shape[0]
         x = x.view(batch_size, -1)
         x = self.dropout(x)

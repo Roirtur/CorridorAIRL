@@ -43,7 +43,7 @@ class QlearningAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # normalized state
-        state_features = tabular_state_representation(obs)
+        state_features = tabular_state_representation(env, obs)  # Ajout de env
 
         # choose action with highest Q-value
         q_values = [self.q_table[(state_features, action)] for action in legal_actions]
@@ -94,7 +94,7 @@ class QlearningAgent(BaseAgent):
 
             # get state and legal actions
             current_legal_actions = env.legal_actions()
-            current_state = tabular_state_representation(obs)
+            current_state = tabular_state_representation(env, obs)  # Ajout de env
             
             action = agent.select_action(env, obs)
             

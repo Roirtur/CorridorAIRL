@@ -1,5 +1,6 @@
 from typing import Dict, Tuple
-from corridor import Corridor  # Ajout pour accéder à shortest_path_lengthimport numpy as np
+from corridor import Corridor 
+import numpy as np
 
 
 def tabular_state_representation(env: Corridor, obs: Dict) -> Tuple:
@@ -22,15 +23,15 @@ def tabular_state_representation(env: Corridor, obs: Dict) -> Tuple:
     # same_col = 1 if p1_pos[1] == p2_pos[1] else 0
     # total_walls_placed = (env.walls_per_player - obs["walls_left"][1]) + (env.walls_per_player - obs["walls_left"][2])
 
-    walls_left = False if obs["walls_left"] == 0 else True
+    walls_left = int(obs["walls_left"] == 0)
 
     # 3. Construction du Tuple final (ajout des distances et proximités)
     return (
-        # obs["to_play"],       # Qui a la main ?
+        obs["to_play"],       # Qui a la main ?
         p1_pos,               # Où est P1 ?
         p2_pos,               # Où est P2 ?
-        obs["walls_left"][1], # Stock P1
-        # obs["walls_left"][2], # Stock P2
+        #obs["walls_left"][1], # Stock P1
+        obs["walls_left"][2], # Stock P2
         dist_p1,              # Distance chemin P1
         dist_p2,              # Distance chemin P2
         manhattan_dist,       # Distance Manhattan entre joueurs

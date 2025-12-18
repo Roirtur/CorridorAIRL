@@ -43,7 +43,7 @@ class SarsaAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # normalized state
-        state_features = tabular_state_representation(obs)
+        state_features = tabular_state_representation(env, obs)
 
         # choose action with highest Q-value
         q_values = [self.q_table[(state_features, action)] for action in legal_actions]
@@ -93,7 +93,7 @@ class SarsaAgent(BaseAgent):
 
             # Current action and state
             current_action = agent.select_action(env, obs)
-            current_state = tabular_state_representation(obs)
+            current_state = tabular_state_representation(env, obs)
 
             # Execute action
             next_obs, _, done, info = env.step(current_action)

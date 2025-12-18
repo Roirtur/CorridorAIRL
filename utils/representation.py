@@ -2,77 +2,111 @@ from typing import Dict, Tuple
 from corridor import Corridor 
 import numpy as np
 
-
-def tabular_state_representation(env: Corridor, obs: Dict) -> Tuple:
-    
-    p1_pos = obs["p1"]
-    p2_pos = obs["p2"]
-
-    # On utilise la même fonction logique pour analyser l'environnement des deux joueurs.
-    # Cela permet à l'agent de voir ses propres blocages ET ceux de l'adversaire.
-    mask_p1 = calculate_adjacency_mask(obs, p1_pos)
-    mask_p2 = calculate_adjacency_mask(obs, p2_pos)
-
-    # Nouvelles features : distances de chemin les plus courtes
-    dist_p1 = env.shortest_path_length(1)  # Distance pour P1 vers sa ligne but
-    dist_p2 = env.shortest_path_length(2)  # Distance pour P2 vers sa ligne but
-
-    # Features de proximité relative
-    manhattan_dist = abs(p1_pos[0] - p2_pos[0]) + abs(p1_pos[1] - p2_pos[1])
-    # same_row = 1 if p1_pos[0] == p2_pos[0] else 0
-    # same_col = 1 if p1_pos[1] == p2_pos[1] else 0
-    # total_walls_placed = (env.walls_per_player - obs["walls_left"][1]) + (env.walls_per_player - obs["walls_left"][2])
-
-    walls_left = int(obs["walls_left"] == 0)
-
-    # 3. Construction du Tuple final (ajout des distances et proximités)
-    return (
-        obs["to_play"],       # Qui a la main ?
-        p1_pos,               # Où est P1 ?
-        p2_pos,               # Où est P2 ?
-        #obs["walls_left"][1], # Stock P1
-        obs["walls_left"][2], # Stock P2
-        dist_p1,              # Distance chemin P1
-        dist_p2,              # Distance chemin P2
-        manhattan_dist,       # Distance Manhattan entre joueurs
-        # same_row,             # Même ligne ?
-        # same_col,             # Même colonne ?
-        # total_walls_placed,   # Murs placés au total
-        walls_left,
-        mask_p1,              # Obstacles immédiats autour de P1
-        mask_p2               # Obstacles immédiats autour de P2
-    )
-
+def bin_walls(walls_left: int) -> int:
+    """
+    Discrétisation des murs pour réduire la taille de la Q-Table.
+    """
+    if walls_left <= 2:
+        return 0 # Critique
+    elif walls_left <= 5:
+        return 1 # Faible
+    elif walls_left <= 8:
+        return 2 # Moyen
+    else:
+        return 3 # Élevé
 
 def calculate_adjacency_mask(obs: Dict, pos: Tuple[int, int]) -> int:
     """
-    Binary encoding for player obstacle :
-    - Bit 0 (+1) : N
-    - Bit 1 (+2) : S
-    - Bit 2 (+4) : W
-    - Bit 3 (+8) : E
+    Encodage binaire des obstacles immédiats (Topologie locale).
+    - Bit 0 (+1) : Nord bloqué
+    - Bit 1 (+2) : Sud bloqué
+    - Bit 2 (+4) : Ouest bloqué
+    - Bit 3 (+8) : Est bloqué
     """
     r, c = pos
-    
+    N = obs["N"]
     mask = 0
     
-    #north
+    # North
     if r == 0 or (r - 1, c) in obs["H"]:
         mask |= 1 
-        
-    #south
-    if r == obs["N"] - 1 or (r, c) in obs["H"]:
+    # South
+    if r == N - 1 or (r, c) in obs["H"]:
         mask |= 2 
-        
-    #west
+    # West
     if c == 0 or (r, c - 1) in obs["V"]:
         mask |= 4  
-
-    #east
-    if c == obs["N"] - 1 or (r, c) in obs["V"]:
+    # East
+    if c == N - 1 or (r, c) in obs["V"]:
         mask |= 8 
         
     return mask
+
+def flip_obs_for_symmetry(obs: Dict) -> Dict:
+    """
+    Applique une symétrie verticale au plateau pour normaliser l'état.
+    Si le joueur actuel est 2 (monte vers le haut), on retourne le plateau pour qu'il "descende" vers le bas.
+    Cela réduit l'espace d'états en traitant les situations symétriques comme identiques.
+    """
+    N = obs["N"]
+    if obs["to_play"] == 1:
+        return obs  # Pas de flip si joueur 1
+    
+    # Flip vertical : échanger p1 et p2, retourner positions, échanger H et V
+    flipped = {
+        "N": N,
+        "to_play": 1,  # Après flip, on traite comme joueur 1
+        "p1": (N - 1 - obs["p2"][0], obs["p2"][1]),  # opp devient p1
+        "p2": (N - 1 - obs["p1"][0], obs["p1"][1]),  # me devient p2
+        "walls_left": {1: obs["walls_left"][2], 2: obs["walls_left"][1]},  # Swap murs
+        "H": {(N - 1 - r, c) for r, c in obs["V"]},  # V devient H après flip
+        "V": {(N - 1 - r, c) for r, c in obs["H"]},  # H devient V après flip
+        "move_count": obs["move_count"]
+    }
+    return flipped
+
+def tabular_state_representation(env: "Corridor", obs: Dict) -> Tuple:
+    """
+    Construction de l'état pour le Q-Learning avec symétrie du plateau.
+    Normalise l'état pour que le joueur actuel "descende" toujours vers le bas, réduisant les états symétriques.
+    Combine : Position Normalisée + Vision Tactique (Mask) + Vision Stratégique (Distance) + Gestion Ressource (Murs)
+    """
+    
+    # Appliquer la symétrie si nécessaire
+    normalized_obs = flip_obs_for_symmetry(obs)
+    
+    # 1. Identification (après normalisation, me est toujours 1)
+    me = normalized_obs["to_play"]  # Toujours 1 après flip
+    opp = 3 - me
+    
+    me_pos = normalized_obs[f"p{me}"]
+    opp_pos = normalized_obs[f"p{opp}"]
+    
+    # 2. Vision Tactique (Masques immédiats avec obs normalisé)
+    mask_me = calculate_adjacency_mask(normalized_obs, me_pos)
+    mask_opp = calculate_adjacency_mask(normalized_obs, opp_pos)
+    
+    # 3. Vision Stratégique (Distances réelles via BFS du moteur sur env original, car env n'est pas modifié)
+    # Note : Utiliser env original pour distances, car flip n'affecte pas les calculs de chemin
+    d_me = env.shortest_path_length(obs["to_play"])  # Utiliser to_play original
+    d_opp = env.shortest_path_length(3 - obs["to_play"])
+    
+    dist_me = d_me if d_me is not None else 99
+    dist_opp = d_opp if d_opp is not None else 99
+    
+    # 4. Gestion des ressources (Binning sur obs original)
+    walls_me_binned = bin_walls(obs["walls_left"][obs["to_play"]])  # to_play original
+    
+    # 5. Construction du Tuple symétrique
+    return (
+        me_pos,               # Position de me (normalisée)
+        opp_pos,              # Position de opp (normalisée)
+        walls_me_binned,      # Mes ressources (binned)
+        dist_me,              # Ma distance au but
+        dist_opp,             # Sa distance au but
+        mask_me,              # Mes blocages locaux
+        mask_opp              # Ses blocages locaux
+    )
 
 def approximation_agent_state_representation(obs: Dict, player: int = 1) -> np.ndarray:
     """

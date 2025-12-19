@@ -4,66 +4,58 @@ import numpy as np
 
 def bin_walls(walls_left: int) -> int:
     """
-    Discrétisation des murs pour réduire la taille de la Q-Table.
+    Walls discretization, use intervals rather than the exact number left
     """
     if walls_left <= 2:
-        return 0 # Critique
+        return 0 
     elif walls_left <= 5:
-        return 1 # Faible
+        return 1 
     elif walls_left <= 8:
-        return 2 # Moyen
+        return 2 
     else:
-        return 3 # Élevé
+        return 3 
 
 def calculate_adjacency_mask(obs: Dict, pos: Tuple[int, int]) -> int:
     """
-    Encodage binaire des obstacles immédiats (Topologie locale).
-    - Bit 0 (+1) : Nord bloqué
-    - Bit 1 (+2) : Sud bloqué
-    - Bit 2 (+4) : Ouest bloqué
-    - Bit 3 (+8) : Est bloqué
+    Binary encoding for immediate wall obstacle.
     """
     r, c = pos
-    N = obs["N"]
     mask = 0
-    
+
     # North
     if r == 0 or (r - 1, c) in obs["H"]:
         mask |= 1 
     # South
-    if r == N - 1 or (r, c) in obs["H"]:
+    if r == obs["N"] - 1 or (r, c) in obs["H"]:
         mask |= 2 
     # West
     if c == 0 or (r, c - 1) in obs["V"]:
         mask |= 4  
     # East
-    if c == N - 1 or (r, c) in obs["V"]:
+    if c == obs["N"] - 1 or (r, c) in obs["V"]:
         mask |= 8 
         
     return mask
 
-def flip_obs_for_symmetry(obs: Dict) -> Dict:
+def vertical_symmetry_obs_flip(obs: Dict) -> Dict:
     """
-    Applique une symétrie verticale au plateau pour normaliser l'état.
-    Si le joueur actuel est 2 (monte vers le haut), on retourne le plateau pour qu'il "descende" vers le bas.
-    Cela réduit l'espace d'états en traitant les situations symétriques comme identiques.
+    Vertical symmetry to normalize the board state
     """
     N = obs["N"]
-    if obs["to_play"] == 1:
-        return obs  # Pas de flip si joueur 1
+    if obs["to_play"] == 1: #no flip for player 1
+        return obs 
     
-    # Flip vertical : échanger p1 et p2, retourner positions, échanger H et V
-    flipped = {
+    flipped_obs = {
         "N": N,
-        "to_play": 1,  # Après flip, on traite comme joueur 1
-        "p1": (N - 1 - obs["p2"][0], obs["p2"][1]),  # opp devient p1
-        "p2": (N - 1 - obs["p1"][0], obs["p1"][1]),  # me devient p2
-        "walls_left": {1: obs["walls_left"][2], 2: obs["walls_left"][1]},  # Swap murs
-        "H": {(N - 1 - r, c) for r, c in obs["V"]},  # V devient H après flip
-        "V": {(N - 1 - r, c) for r, c in obs["H"]},  # H devient V après flip
+        "to_play": 1,  
+        "p1": (N - 1 - obs["p2"][0], obs["p2"][1]), 
+        "p2": (N - 1 - obs["p1"][0], obs["p1"][1]),  
+        "walls_left": {1: obs["walls_left"][2], 2: obs["walls_left"][1]}, 
+        "H": {(N - 1 - r, c) for r, c in obs["V"]},  
+        "V": {(N - 1 - r, c) for r, c in obs["H"]}, 
         "move_count": obs["move_count"]
     }
-    return flipped
+    return flipped_obs
 
 def tabular_state_representation(env: "Corridor", obs: Dict) -> Tuple:
     """
@@ -73,7 +65,7 @@ def tabular_state_representation(env: "Corridor", obs: Dict) -> Tuple:
     """
     
     # Appliquer la symétrie si nécessaire
-    normalized_obs = flip_obs_for_symmetry(obs)
+    normalized_obs =  vertical_symmetry_obs_flip(obs)
     
     # 1. Identification (après normalisation, me est toujours 1)
     me = normalized_obs["to_play"]  # Toujours 1 après flip

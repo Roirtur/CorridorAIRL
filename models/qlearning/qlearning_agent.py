@@ -43,7 +43,7 @@ class QlearningAgent(BaseAgent):
             return random.choice(legal_actions)
             
         # normalized state
-        state_features = tabular_state_representation(obs)
+        state_features = tabular_state_representation(env, obs)  # Ajout de env
 
         # choose action with highest Q-value
         q_values = [self.q_table[(state_features, action)] for action in legal_actions]
@@ -81,6 +81,8 @@ class QlearningAgent(BaseAgent):
         # Previous state/action
         prev_state = None
         prev_action = None
+        prev_reward = 0
+        prev_distance = env.shortest_path_length(agent_player) 
 
         while steps < max_steps:
             current_player = obs["to_play"]
@@ -94,7 +96,7 @@ class QlearningAgent(BaseAgent):
 
             # get state and legal actions
             current_legal_actions = env.legal_actions()
-            current_state = tabular_state_representation(obs)
+            current_state = tabular_state_representation(env, obs)  # Ajout de env
             
             action = agent.select_action(env, obs)
             
@@ -102,22 +104,28 @@ class QlearningAgent(BaseAgent):
             next_obs, _, done, info = env.step(action)
             
             if is_learning:
-                reward = -0.01  # Small constant step penalty
+
+                current_distance = env.shortest_path_length(agent_player)
+                
+                distance_delta = prev_distance - current_distance
+                next_reward = distance_delta * 0.1 - 0.01
                 
                 if prev_state is not None:
                     self.update(
                         prev_state,
                         prev_action,
-                        reward,
+                        prev_reward,
                         current_state,
                         False,
                         current_legal_actions
                     )
                 
-                episode_reward += reward
+                episode_reward += next_reward
                 
                 prev_state = current_state
                 prev_action = action
+                prev_distance = current_distance
+                prev_reward = next_reward
 
             if done:
                 if prev_state is not None:

@@ -3,14 +3,15 @@
 import os
 from corridor import Corridor
 from models import QlearningAgent, SarsaAgent, RandomAgent, GreedyPathAgent
-from utils.saving import load_tabular_model
+from models.dqn.dqn_agent import DQNAgent
+from utils.saving import load_tabular_model, load_approximation_agent_model
 
 
 def list_saved_models(directory: str = "saved_models") -> list:
-    """Lists all model files (.pkl) in the specified directory."""
+    """Lists all model files (.pkl and .pth) in the specified directory."""
     if not os.path.exists(directory):
         return []
-    files = [f for f in os.listdir(directory) if f.endswith('.pkl')]
+    files = [f for f in os.listdir(directory) if f.endswith('.pkl') or f.endswith('.pth')]
     return sorted(files)
 
 
@@ -120,12 +121,15 @@ def load_agent_from_path(path: str, agent_type: str = None):
     """
     from utils.saving import parse_model_info
     
-    # Try to infer agent type from filename
+    model_info = parse_model_info(path)
+    
+    # Try to infer agent type from filename or extension
     if agent_type is None:
-        model_info = parse_model_info(path)
         agent_name = model_info['agent_name'].lower()
         
-        if 'qlearn' in agent_name or 'q_learn' in agent_name or 'qagent' in agent_name:
+        if path.endswith('.pth') or 'dqn' in agent_name:
+            agent_type = 'dqn'
+        elif 'qlearn' in agent_name or 'q_learn' in agent_name or 'qagent' in agent_name:
             agent_type = 'qlearning'
         elif 'sarsa' in agent_name:
             agent_type = 'sarsa'
@@ -134,31 +138,49 @@ def load_agent_from_path(path: str, agent_type: str = None):
             print(f"\nCannot infer agent type from filename: {os.path.basename(path)}")
             print("1. Q-Learning")
             print("2. SARSA")
+            print("3. DQN")
             while True:
-                choice = input("Enter agent type (1 or 2): ").strip()
+                choice = input("Enter agent type (1, 2 or 3): ").strip()
                 if choice == "1":
                     agent_type = 'qlearning'
                     break
                 elif choice == "2":
                     agent_type = 'sarsa'
                     break
+                elif choice == "3":
+                    agent_type = 'dqn'
+                    break
                 print("Invalid choice.")
     
     # Create agent with training_mode=False
     if agent_type == 'qlearning':
         agent_name = f"LoadedQAgent"
+        agent = QlearningAgent(name=agent_name, training_mode=False)
+        load_tabular_model(agent, path)
+        
     elif agent_type == 'sarsa':
         agent_name = f"LoadedSarsaAgent"
+        agent = SarsaAgent(name=agent_name, training_mode=False)
+        load_tabular_model(agent, path)
+        
+    elif agent_type == 'dqn':
+        agent_name = f"LoadedDQNAgent"
+        # Need board size for DQN initialization
+        board_size = model_info.get('board_size')
+        if not board_size:
+            while True:
+                try:
+                    board_size = int(input("Enter board size for DQN (default 5): ").strip() or "5")
+                    break
+                except ValueError:
+                    print("Invalid number.")
+        
+        agent = DQNAgent(name=agent_name, board_size=board_size, training_mode=False)
+        load_approximation_agent_model(agent, path)
+        
     else:
         raise ValueError(f"Unknown agent type: {agent_type}")
     
-    if agent_type == 'qlearning':
-        agent = QlearningAgent(name=agent_name, training_mode=False)
-    elif agent_type == 'sarsa':
-        agent = SarsaAgent(name=agent_name, training_mode=False)
-    
-    # Load the model
-    load_tabular_model(agent, path)
     return agent
 
 

@@ -106,11 +106,19 @@ class DQNAgent(BaseAgent):
         batch, indices = self.buffer.sample(self.batch_size)
         states, actions, rewards, next_states, dones, next_legal_actions = zip(*batch)
 
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        states = torch.FloatTensor(np.array(states)).to(self.device)
+        actions = torch.LongTensor(np.array(actions)).to(self.device)
+        rewards = torch.FloatTensor(np.array(rewards)).to(self.device)
+        dones = torch.FloatTensor(np.array(dones)).to(self.device)
+
+        # Gestion robuste des next_states (remplace None par des zéros pour les états terminaux)
+        next_states_processed = []
+        for s in next_states:
+            if s is None:
+                next_states_processed.append(np.zeros(self.state_shape, dtype=np.float32))
+            else:
+                next_states_processed.append(s)
+        next_states = torch.FloatTensor(np.array(next_states_processed)).to(self.device)
 
         q_values_all = self.q_network(states)
 
@@ -119,9 +127,11 @@ class DQNAgent(BaseAgent):
         batch_size = states.shape[0]
         legal_mask = torch.zeros(batch_size, self.action_dim, dtype=torch.bool, device=self.device)
 
+        # Gestion robuste des actions légales (ignore si None)
         for i, legal_actions in enumerate(next_legal_actions):
-            legal_indices = self.action_encoder.encode_legal_actions(legal_actions)
-            legal_mask[i, legal_indices] = True
+            if legal_actions is not None and len(legal_actions) > 0:
+                legal_indices = self.action_encoder.encode_legal_actions(legal_actions)
+                legal_mask[i, legal_indices] = True
 
         with torch.no_grad():
             next_q_values_online = self.q_network(next_states)

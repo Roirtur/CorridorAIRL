@@ -75,7 +75,29 @@ class DQNAgent(BaseAgent):
 
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         """Select action following BaseAgent interface with advanced exploration."""
-        raise NotImplementedError
+        legal_actions = env.legal_actions()
+        if legal_actions is None:
+            return None
+
+        if np.random.random() < self.epsilon:
+            action =  random.choice(legal_actions)
+            return action
+        else:
+            #discretize the state, convert state to tensor for the network, send it to device, add the batch dimension
+            discretized_state = approximation_agent_state_representation(obs)
+            discretized_state = torch.tensor(discretized_state)
+            discretized_state  = discretized_state.to(self.device)
+            discretized_state = discretized_state.unsqueeze(0)
+
+            #give state to network to gather the corresponding q_values
+            q_values = self.q_network(discretized_state)
+            #get legal actions indexes -> encoded index list
+            legal_actions_indexes = self.action_encoder.encode_legal_actions(legal_actions)
+            # -> get the best action index
+            best_legal_action_index = legal_actions_indexes[torch.argmax(q_values[0, legal_actions_indexes])]
+            # now return the best action after decoding it
+            return self.action_encoder.decode(best_legal_action_index)
+
 
     def update(self, state, action_idx, reward, next_state, done, next_legal_actions):
         """Store transition and train network."""

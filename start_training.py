@@ -6,6 +6,8 @@ from models import QlearningAgent
 from models import SarsaAgent
 from models import RandomAgent
 from models import GreedyPathAgent
+# Import DQN Agent
+from models import DQNAgent
 from utils.training import training_loop
 from utils.saving import generate_path_name
 
@@ -16,8 +18,9 @@ def get_user_input():
     print("\nSelect Agent:")
     print("1. Q-Learning")
     print("2. SARSA")
+    print("3. DQN (Deep Q-Network)")
     while True:
-        choice = input("Enter choice (1 or 2): ").strip()
+        choice = input("Enter choice (1-3): ").strip()
         if choice == "1":
             agent_type = "qlearning"
             agent_name = input("Enter agent name (default: QAgent): ").strip() or "QAgent"
@@ -25,6 +28,10 @@ def get_user_input():
         elif choice == "2":
             agent_type = "sarsa"
             agent_name = input("Enter agent name (default: SarsaAgent): ").strip() or "SarsaAgent"
+            break
+        elif choice == "3":
+            agent_type = "dqn"
+            agent_name = input("Enter agent name (default: DQNAgent): ").strip() or "DQNAgent"
             break
         print("Invalid choice. Please try again.")
 
@@ -91,8 +98,11 @@ def main():
     # Initialize Agent
     if agent_type == "qlearning":
         agent = QlearningAgent(name=agent_name)
-    else:
+    elif agent_type == "sarsa":
         agent = SarsaAgent(name=agent_name)
+    elif agent_type == "dqn":
+        # DQN requires board_size to build the neural network input layer
+        agent = DQNAgent(name=agent_name, board_size=board_size)
         
     # Generate Paths
     model_path = generate_path_name(agent_name, episodes, opponent_str, "model", board_size)

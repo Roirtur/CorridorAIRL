@@ -76,24 +76,26 @@ class DQNAgent(BaseAgent):
     def select_action(self, env: Corridor, obs: Dict) -> Action:
         """Select action following BaseAgent interface with advanced exploration."""
         legal_actions = env.legal_actions()
-        if legal_actions is None:
+        if not legal_actions:
             return None
 
-        if np.random.random() < self.epsilon:
-            action =  random.choice(legal_actions)
+        if self.training_mode and np.random.random() < self.epsilon:
+            action = random.choice(legal_actions)
             return action
         
         discretized_state = approximation_agent_state_representation(obs)
-        discretized_state = torch.tensor(discretized_state).to(self.device).unsqueeze(0)
+        state_tensor = torch.tensor(discretized_state, dtype=torch.float32).to(self.device).unsqueeze(0)
 
-        q_values = self.q_network(discretized_state)
+        with torch.no_grad():
+            q_values = self.q_network(state_tensor)
 
         legal_actions_indexes = self.action_encoder.encode_legal_actions(legal_actions)
-
-        best_legal_action_index = legal_actions_indexes[torch.argmax(q_values[0, legal_actions_indexes])]
+        
+        legal_q = q_values[0, legal_actions_indexes]
+        best_legal_idx_in_subset = torch.argmax(legal_q).item()
+        best_legal_action_index = legal_actions_indexes[best_legal_idx_in_subset]
         
         return self.action_encoder.decode(best_legal_action_index)
-
 
     def update(self, state, action_idx, reward, next_state, done, next_legal_actions):
         """Store transition and train network."""
@@ -104,24 +106,24 @@ class DQNAgent(BaseAgent):
             return
         
         batch, indices = self.buffer.sample(self.batch_size)
-        states, actions, rewards, next_states, dones, next_legal_actions = zip(*batch)
+        states, actions, rewards, next_states, dones, next_legal_actions_batch = zip(*batch)
 
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32, device=self.device)
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
 
         q_values_all = self.q_network(states)
-
         current_q_values = q_values_all.gather(1, actions.unsqueeze(1))
 
         batch_size = states.shape[0]
         legal_mask = torch.zeros(batch_size, self.action_dim, dtype=torch.bool, device=self.device)
 
-        for i, legal_actions in enumerate(next_legal_actions):
-            legal_indices = self.action_encoder.encode_legal_actions(legal_actions)
-            legal_mask[i, legal_indices] = True
+        for i, legal_acts in enumerate(next_legal_actions_batch):
+            if not dones[i] and legal_acts:
+                legal_indices = self.action_encoder.encode_legal_actions(legal_acts)
+                legal_mask[i, legal_indices] = True
 
         with torch.no_grad():
             next_q_values_online = self.q_network(next_states)
@@ -154,9 +156,7 @@ class DQNAgent(BaseAgent):
 
         self.learn_step += 1
         if self.learn_step % self.target_update_freq == 0:
-            
             self.target_network.load_state_dict(self.q_network.state_dict())
-
 
     def run_episode(
         self,
@@ -185,9 +185,8 @@ class DQNAgent(BaseAgent):
                 agent = opponent
                 is_learning = False
 
-            # get state and legal actions
             current_legal_actions = env.legal_actions()
-            current_state = approximation_agent_state_representation(obs)  # Ajout de env
+            current_state = approximation_agent_state_representation(obs)
             
             action = agent.select_action(env, obs)
             
@@ -195,10 +194,12 @@ class DQNAgent(BaseAgent):
             next_obs, _, done, info = env.step(action)
             
             if is_learning:
-
                 current_distance = env.shortest_path_length(agent_player)
                 
-                distance_delta = prev_distance - current_distance
+                dist_now = current_distance if current_distance is not None else 99
+                dist_prev = prev_distance if prev_distance is not None else 99
+                
+                distance_delta = dist_prev - dist_now
                 next_reward = distance_delta * 0.1 - 0.01
 
                 action_idx = self.action_encoder.encode(action)
@@ -217,7 +218,7 @@ class DQNAgent(BaseAgent):
                 
                 prev_state = current_state
                 prev_action_idx = action_idx
-                prev_distance = current_distance
+                prev_distance = dist_now
                 prev_reward = next_reward
 
             if done:
@@ -230,13 +231,15 @@ class DQNAgent(BaseAgent):
                     else:
                         final_reward = -1.0
                     
+                    final_state_rep = approximation_agent_state_representation(next_obs)
+                    
                     self.update(
                         prev_state,
                         prev_action_idx,
                         final_reward,
-                        None,
+                        final_state_rep,
                         True,
-                        None
+                        []
                     )
                     
                     episode_reward += final_reward
@@ -249,7 +252,6 @@ class DQNAgent(BaseAgent):
             "reward": episode_reward,
             "steps": steps
         }
-
 
     def save(self, path: str):
         """Save NN weights to file."""

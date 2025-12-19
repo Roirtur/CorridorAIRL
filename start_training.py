@@ -6,7 +6,6 @@ from models import QlearningAgent
 from models import SarsaAgent
 from models import RandomAgent
 from models import GreedyPathAgent
-# Import DQN Agent
 from models import DQNAgent
 from utils.training import training_loop
 from utils.saving import generate_path_name
@@ -50,40 +49,55 @@ def get_user_input():
     while True:
         try:
             episodes = int(input("\nEnter total number of episodes (default 5000): ").strip() or "5000")
-            if episodes < 1:
-                print("Episodes must be positive.")
+            if episodes < 100:
+                print("Episodes must be at least 100.")
                 continue
             break
         except ValueError:
             print("Invalid number.")
 
-    # 4. Curriculum
-    print("\nSelect Opponent Schedule:")
-    print("1. Random Agent only")
-    print("2. Greedy Agent only")
-    print("3. Curriculum: Random (50%) -> Greedy (50%)")
+    print("\nSelect Training Curriculum:")
+    print("1. Basic: Random Agent only")
+    print("2. Intermediate: Random (50%) -> Greedy (50%)")
+    print("3. Advanced: Random (30%) -> Greedy (30%) -> Mixed Pool (40%)")
     
     schedule = []
     opponent_str = ""
     
     while True:
         choice = input("Enter choice (1-3): ").strip()
+        
+        random_agent = RandomAgent()
+        greedy_agent = GreedyPathAgent()
+        
         if choice == "1":
-            schedule = [(RandomAgent(), episodes)]
-            opponent_str = "Random"
+            schedule = [(random_agent, episodes)]
+            opponent_str = "RandomOnly"
             break
+            
         elif choice == "2":
-            schedule = [(GreedyPathAgent(), episodes)]
-            opponent_str = "Greedy"
-            break
-        elif choice == "3":
             half = episodes // 2
             schedule = [
-                (RandomAgent(), half),
-                (GreedyPathAgent(), episodes - half)
+                (random_agent, half),
+                (greedy_agent, episodes - half)
             ]
-            opponent_str = "Curriculum"
+            opponent_str = "RandomToGreedy"
             break
+            
+        elif choice == "3":
+            # 30% Random, 30% Greedy, 40% Mixed (Random + Greedy)
+            part1 = int(episodes * 0.3)
+            part2 = int(episodes * 0.3)
+            part3 = episodes - part1 - part2
+            
+            schedule = [
+                (random_agent, part1),
+                (greedy_agent, part2),
+                ([random_agent, greedy_agent], part3) # List implies mixed pool
+            ]
+            opponent_str = "CurriculumMixed"
+            break
+            
         print("Invalid choice.")
 
     return agent_type, agent_name, board_size, episodes, schedule, opponent_str
@@ -108,11 +122,11 @@ def main():
     model_path = generate_path_name(agent_name, episodes, opponent_str, "model", board_size)
     data_path = generate_path_name(agent_name, episodes, opponent_str, "data", board_size)
     
-    print(f"\n=== Starting Training ===")
-    print(f"Agent: {agent.name} ({agent_type})")
-    print(f"Board: {board_size}x{board_size}")
-    print(f"Episodes: {episodes}")
-    print(f"Opponent: {opponent_str}")
+    print(f"\n=== Starting Training Session ===")
+    print(f"Agent:     {agent.name} ({agent_type})")
+    print(f"Board:     {board_size}x{board_size}")
+    print(f"Episodes:  {episodes}")
+    print(f"Schedule:  {opponent_str}")
     print(f"Saving to: {model_path}")
     
     # Run Training
@@ -122,6 +136,8 @@ def main():
         opponents_schedule=schedule,
         save_path_model=model_path,
         save_path_data=data_path,
+        eval_interval=episodes // 20,
+        save_interval=episodes // 5
     )
 
 if __name__ == "__main__":

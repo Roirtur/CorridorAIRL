@@ -33,7 +33,7 @@ def run_eval_game(env: Corridor, agent: BaseAgent, opponent: BaseAgent) -> float
         return 1.0 if not agent_is_p1 else 0.0
     return 0.0 # Draw
 
-def tabular_training_loop(
+def training_loop(
     env: Corridor,
     agent: BaseAgent,
     opponents_schedule: List[Tuple[BaseAgent, int]],
@@ -113,11 +113,11 @@ def tabular_training_loop(
                 print(f"Episode {i+1}/{n_episodes} | Avg Reward: {avg_reward:.3f} | Epsilon: {epsilon:.3f} | Win Rate: {win_rate*100:.1f}%")
                 
             if (i + 1) % save_interval == 0:
-                save_tabular_model(agent, save_path_model)
+                agent.save(save_path_model)
                 save_training_data(history, save_path_data)
                 
         total_episodes += n_episodes
         
-    save_tabular_model(agent, save_path_model)
+    agent.save(save_path_model)
     save_training_data(history, save_path_data)
     print("Training complete.")

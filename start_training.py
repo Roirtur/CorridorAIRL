@@ -6,7 +6,7 @@ from models import QlearningAgent
 from models import SarsaAgent
 from models import RandomAgent
 from models import GreedyPathAgent
-from utils.training import tabular_training_loop
+from utils.training import training_loop
 from utils.saving import generate_path_name
 
 def get_user_input():
@@ -106,7 +106,7 @@ def main():
     print(f"Saving to: {model_path}")
     
     # Run Training
-    tabular_training_loop(
+    training_loop(
         env=env,
         agent=agent,
         opponents_schedule=schedule,

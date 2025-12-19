@@ -83,26 +83,80 @@ class DQNAgent(BaseAgent):
             action =  random.choice(legal_actions)
             return action
         
-        #discretize the state, convert state to tensor for the network, send it to device, add the batch dimension
         discretized_state = approximation_agent_state_representation(obs)
         discretized_state = torch.tensor(discretized_state).to(self.device).unsqueeze(0)
 
-        #give state to network to gather the corresponding q_values
         q_values = self.q_network(discretized_state)
 
-        #get legal actions indexes -> encoded index list
         legal_actions_indexes = self.action_encoder.encode_legal_actions(legal_actions)
 
-        # -> get the best action index
         best_legal_action_index = legal_actions_indexes[torch.argmax(q_values[0, legal_actions_indexes])]
         
-        # now return the best action after decoding it
         return self.action_encoder.decode(best_legal_action_index)
 
 
     def update(self, state, action_idx, reward, next_state, done, next_legal_actions):
         """Store transition and train network."""
-        raise NotImplementedError
+        
+        self.buffer.push(state, action_idx, reward, next_state, done, next_legal_actions)
+
+        if len(self.buffer) < self.batch_size:
+            return
+        
+        batch, indices = self.buffer.sample(self.batch_size)
+        states, actions, rewards, next_states, dones, next_legal_actions = zip(*batch)
+
+        states = torch.FloatTensor(states).to(self.device)
+        actions = torch.LongTensor(actions).to(self.device)
+        rewards = torch.FloatTensor(rewards).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
+        dones = torch.FloatTensor(dones).to(self.device)
+
+        q_values_all = self.q_network(states)
+
+        current_q_values = q_values_all.gather(1, actions.unsqueeze(1))
+
+        batch_size = states.shape[0]
+        legal_mask = torch.zeros(batch_size, self.action_dim, dtype=torch.bool, device=self.device)
+
+        for i, legal_actions in enumerate(next_legal_actions):
+            legal_indices = self.action_encoder.encode_legal_actions(legal_actions)
+            legal_mask[i, legal_indices] = True
+
+        with torch.no_grad():
+            next_q_values_online = self.q_network(next_states)
+            
+            masked_q_values = torch.where(
+                legal_mask,
+                next_q_values_online,
+                torch.tensor(-1e9, device=self.device)
+            )
+            
+            best_next_actions = masked_q_values.argmax(dim=1)
+
+            next_q_values_target = self.target_network(next_states)
+            next_q_values = next_q_values_target.gather(1, best_next_actions.unsqueeze(1)).squeeze(1)
+
+            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+            target_q_values = target_q_values.unsqueeze(1)
+
+        loss = self.loss_fn(current_q_values, target_q_values)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
+
+        self.optimizer.step()
+
+        td_errors = (target_q_values.squeeze() - current_q_values.squeeze()).abs().detach().cpu().numpy()
+        self.buffer.update_priorities(indices, td_errors)
+
+        self.learn_step += 1
+        if self.learn_step % self.target_update_freq == 0:
+            
+            self.target_network.load_state_dict(self.q_network.state_dict())
+
 
     def run_episode(
         self,
@@ -111,8 +165,91 @@ class DQNAgent(BaseAgent):
         agent_player: int = 1,
         max_steps: int = 250
     ) -> Dict:
-        """Run one training episode."""
-        raise NotImplementedError
+        obs = env.reset()
+        
+        episode_reward = .0
+        steps = 0
+
+        prev_state = None
+        prev_action_idx = None
+        prev_reward = .0
+        prev_distance = env.shortest_path_length(agent_player) 
+
+        while steps < max_steps:
+            current_player = obs["to_play"]
+            
+            if current_player == agent_player:
+                agent = self
+                is_learning = True
+            else:
+                agent = opponent
+                is_learning = False
+
+            # get state and legal actions
+            current_legal_actions = env.legal_actions()
+            current_state = approximation_agent_state_representation(obs)  # Ajout de env
+            
+            action = agent.select_action(env, obs)
+            
+            # execute action
+            next_obs, _, done, info = env.step(action)
+            
+            if is_learning:
+
+                current_distance = env.shortest_path_length(agent_player)
+                
+                distance_delta = prev_distance - current_distance
+                next_reward = distance_delta * 0.1 - 0.01
+
+                action_idx = self.action_encoder.encode(action)
+                
+                if prev_state is not None:
+                    self.update(
+                        prev_state,
+                        prev_action_idx,
+                        prev_reward,
+                        current_state,
+                        False,
+                        current_legal_actions
+                    )
+                
+                episode_reward += next_reward
+                
+                prev_state = current_state
+                prev_action_idx = action_idx
+                prev_distance = current_distance
+                prev_reward = next_reward
+
+            if done:
+                if prev_state is not None:
+                    winner = info.get("winner")
+                    if winner == agent_player:
+                        final_reward = 1.0
+                    elif winner is None:
+                        final_reward = -0.5
+                    else:
+                        final_reward = -1.0
+                    
+                    self.update(
+                        prev_state,
+                        prev_action_idx,
+                        final_reward,
+                        None,
+                        True,
+                        None
+                    )
+                    
+                    episode_reward += final_reward
+                break
+            
+            obs = next_obs
+            steps += 1
+        
+        return {
+            "reward": episode_reward,
+            "steps": steps
+        }
+
 
     def save(self, path: str):
         """Save NN weights to file."""

@@ -170,6 +170,38 @@ Notre représentation comporte $C=6$ canaux, normalisés entre 0 et 1 pour assur
     \item \textbf{Canaux de Contexte (2 plans) :} Le nombre de murs restants est une information scalaire, mais cruciale. Pour l'intégrer dans une architecture convolutionnelle, nous utilisons la technique des "plans scalaires" (utilisée notamment par AlphaGo) : nous remplissons deux plans entiers avec la valeur normalisée du nombre de murs restants (pour soi et pour l'adversaire). Cela fournit un biais constant à chaque neurone de la couche d'entrée, conditionnant l'analyse spatiale aux ressources disponibles.
 \end{itemize}
 
+\subsection{Système de Récompenses}
+
+Conformément à l'implémentation du moteur, les récompenses terminales sont :
+\[
+r_T = 
+\begin{cases}
++1.0 & \text{si l'agent gagne au coup terminal},\\[2pt]
+-1.0 & \text{si l'agent perd},\\[2pt]
+-0.5 & \text{en cas de match nul / timeout (pour certaines expériences).}
+\end{cases}
+\]
+
+Pour les agents tabulaires (Q-Learning, SARSA) nous avons ajouté un terme de shaping basé sur la variation de la distance au but calculée par BFS. À chaque pas pertinent de l'agent, la récompense non terminale est :
+\[
+r_t = \alpha \cdot \big(d_{t-1} - d_t\big) + c_{\text{step}},
+\]
+avec les hyper-paramètres utilisés dans le code :
+\begin{itemize}
+    \item $\alpha = 0.1$ (gain sur la réduction de la distance) ;
+    \item $c_{\text{step}} = -0.01$ (petite pénalité de pas pour décourager les aller-retour).
+\end{itemize}
+Ainsi, chaque action qui rapproche l'agent de son objectif reçoit une récompense positive proportionnelle à la diminution de la distance; les actions qui l'éloignent reçoivent une récompense négative relative. Ce shaping est appliqué uniquement pendant l'entraînement tabulaire afin d'accélérer la propagation des valeurs dans la Q-table.
+
+\paragraph{Justification et limites}
+Le shaping par différence de distance satisfait l'intuition stratégique (progresser vers la ligne adverse) et réduit la variance des retours en fournissant un signal dense. Néanmoins :
+\begin{itemize}
+    \item il peut modifier la politique optimale si mal calibré (risque d'introduire un biais vers des trajectoires ``courtes'' mais tactiquement faibles) ;
+    \item il dépend de la métrique de distance choisie (ici shortest path via BFS) — lorsque les murs sont posés l'estimation peut varier brutalement ;
+    \item il n'est appliqué qu'aux agents tabulaires : les agents DQN, traitant une représentation spatiale riche, reçoivent par défaut les récompenses fournies par l'environnement (0 pour coups non-terminaux, +1/-1 terminaux). Dans les expérimentations, on peut néanmoins introduire le même shaping pour DQN si nécessaire.
+\end{itemize}
+
+
 \section{Resultats expérimentaux}
 L'ensemble de nos procédés et résultats experimentaux sont regroupés dans le fichier \textbf{experiments.ipynb}
 

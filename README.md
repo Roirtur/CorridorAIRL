@@ -1,6 +1,8 @@
 # Corridor RL Agent
 
-This project implements multiple reinforcement learning agents for the Corridor/Quoridor game. The goal is to develop agents that learn to play strategically and win against various opponents.
+
+This project implements a modular framework for training and evaluating multiple reinforcement learning agents for the Corridor/Quoridor game. The goal is to develop agents that learn to play strategically and win against various types of opponents, using both tabular and deep RL methods.
+
 
 ## Project Structure
 
@@ -10,11 +12,11 @@ This project implements multiple reinforcement learning agents for the Corridor/
 ├── corridor_starter.py      # Legacy starter script
 ├── start_training.py        # Interactive training script
 ├── start_evaluation.py      # Interactive evaluation script
-├── experiments.ipynb        # Jupyter notebook for experiments
+├── experiments.ipynb        # Jupyter notebook for experiments and analysis
 ├── requirements.txt         # Python dependencies
 ├── models/                  # Agent implementations
 │   ├── __init__.py
-│   ├── base_agent.py        # Base agent interface
+│   ├── base_agent.py        # Base agent interface (all agents inherit)
 │   ├── random/
 │   │   └── random_agent.py  # Random baseline agent
 │   ├── greedy/
@@ -24,17 +26,21 @@ This project implements multiple reinforcement learning agents for the Corridor/
 │   ├── sarsa/
 │   │   └── sarsa_agent.py        # SARSA tabular agent
 │   └── dqn/
-│       └── dqn_agent.py          # Deep Q-Network agent (advanced)
+│       ├── dqn_agent.py          # Deep Q-Network agent
+│       ├── dqn_network.py        # DQN neural network architecture
+│       ├── action_encoder.py     # Action encoding for DQN
+│       └── prioritized_replay.py # Experience replay buffer
 ├── utils/
 │   ├── representation.py    # State representation functions
 │   ├── saving.py            # Model saving/loading utilities
 │   └── training.py          # Training loop utilities
-├── saved_models/            # Trained model checkpoints
+├── saved_models/            # Trained model checkpoints (auto-named)
 └── report/
-    └── report.tex           # LaTeX project report
+   └── report.tex           # LaTeX project report
 ```
 
 ## Installation
+
 
 Install the required dependencies:
 
@@ -50,28 +56,31 @@ Dependencies include:
 
 ## Training Agents
 
-Use the interactive training script to train Q-Learning or SARSA agents:
+
+Use the interactive training script to train Q-Learning, SARSA, or DQN agents:
 
 ```bash
 python start_training.py
 ```
 
 The script will guide you through:
-1. **Agent Selection**: Choose Q-Learning or SARSA
+1. **Agent Selection**: Choose Q-Learning, SARSA, or DQN (Deep Q-Network)
 2. **Board Size**: Set the game board dimensions (default: 5x5)
 3. **Training Episodes**: Number of episodes to train
 4. **Opponent Schedule**: Choose training curriculum:
    - Random agent only
-   - Greedy agent only
-   - Curriculum learning (Random → Greedy)
+   - Random to Greedy (Random → Greedy)
+   - Mixed curriculum (e.g., Random → Greedy → Mixed Pool)
 
-Models are automatically saved to `saved_models/` with descriptive names like:
-- `QAgent_B5_E5000_VSCurriculum.pkl` (board size 5, 5000 episodes)
-- `SarsaAgent_B9_E10000_VSGreedy.pkl` (board size 9, 10000 episodes)
+Models and training data are automatically saved to `saved_models/` with descriptive names like:
+- `QAgent_B5_E5000_VSCurriculumMixed.pkl` (board size 5, 5000 episodes, curriculum)
+- `SarsaAgent_B9_E10000_VSGreedy.pkl` (board size 9, 10000 episodes, greedy)
+- `DQNAgent_B5_E2000_VSRandomToGreedy.pth` (DQN, board size 5, 2000 episodes, curriculum)
 
-The naming format includes board size, episode count, and opponent type for easy identification.
+The naming format includes agent type, board size, episode count, and opponent curriculum for easy identification. Model saving/loading is handled by utility functions in `utils/saving.py`.
 
 ## Evaluating Agents
+
 
 Use the interactive evaluation script to test trained agents:
 
@@ -79,8 +88,9 @@ Use the interactive evaluation script to test trained agents:
 python start_evaluation.py
 ```
 
+
 The script provides:
-1. **Model Selection**: Choose from saved models or provide custom path
+1. **Model Selection**: Choose from saved models or provide a custom path
 2. **Opponent Selection**: 
    - Random Agent
    - Greedy Agent
@@ -93,9 +103,10 @@ The script provides:
    - Randomized
 6. **Board Size**: Auto-detected from filename or manual entry
 
-Results include win rate, loss rate, draw rate, average game length, and optional board visualizations showing the final game states with player roles clearly indicated.
+Results include win rate, loss rate, draw rate, average game length, and optional board visualizations showing the final game states with player roles clearly indicated. The evaluation script supports all agent types and can compare any combination of agents.
 
 ## Implemented Agents
+
 
 ### Tabular Agents
 - **Q-Learning**: Off-policy TD learning with epsilon-greedy exploration
@@ -111,9 +122,12 @@ Both use:
 - **Greedy Agent**: Heuristic shortest-path strategy
 
 ### Advanced Agents
-- **DQN Agent**: Deep Q-Network with experience replay (advanced implementation)
+- **DQN Agent**: Deep Q-Network with experience replay and prioritized replay buffer (advanced implementation, uses PyTorch)
+
+All agents inherit from a common `BaseAgent` interface, making it easy to add new agent types or modify existing ones. The agent system is fully modular and extensible.
 
 ## Experiments
+
 
 Explore training results and visualizations in:
 ```bash
@@ -122,6 +136,7 @@ jupyter notebook experiments.ipynb
 
 ## Project Report
 
+
 The LaTeX report is located in `report/report.tex`. It includes:
 - Learning methodology and algorithm descriptions
 - Implementation details (state representation, rewards, hyperparameters)
@@ -129,13 +144,15 @@ The LaTeX report is located in `report/report.tex`. It includes:
 - Analysis and discussion of agent performance
 - Limitations and future work
 
+
 ## Game Rules
 
 Corridor/Quoridor is a 2-player board game where:
 - Each player starts on opposite sides of an N×N board
 - Goal: Reach the opposite side first
-- Players can either **move** their pawn or **place walls** to block opponent
+- Players can either **move** their pawn or **place walls** to block the opponent
 - Each player has a limited number of walls (default: 10)
+
 
 ## Results
 
@@ -143,13 +160,15 @@ Trained models demonstrate:
 - Strong performance against random opponents
 - Competitive play against greedy heuristic agents
 - Strategic wall placement and movement decisions
-- Curriculum learning improves robustness
+- Curriculum and mixed-opponent training improves robustness and generalization
 
 See `experiments.ipynb` and the report for detailed analysis.
+
 
 ## Authors
 
 Niels ROUDEAU & Arthur MACDONALD
+
 
 ## License
 

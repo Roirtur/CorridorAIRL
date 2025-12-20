@@ -1,0 +1,222 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel} % Pour la typographie française
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{verbatim}
+\usepackage{amsmath}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{changepage}
+\usepackage{adjustbox}
+\usepackage{hyperref}
+\usepackage{geometry} % Pour gérer les marges
+\usepackage{enumitem}
+
+\usetikzlibrary{trees}
+
+\lstdefinestyle{treeStyle}{
+    basicstyle=\small\ttfamily,
+    breaklines=true,
+    frame=single, % Ajoute un cadre
+    frameround=tttt,
+    rulesepcolor=\color{gray!50},
+    captionpos=b,
+    numbers=none
+}
+
+\geometry{hmargin=2.5cm,vmargin=2.5cm}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    \rule{\linewidth}{0.5mm} \\[0.4cm] 
+    
+    {\Huge \bfseries Agent intelligent jeu de Corridor \par}
+
+    {\large \bfseries Projet réalisé dans le cadre de l'UE "Apprentissage par Renforcement" du Master 2 Informatique - Parcours Intelligence Artificelle à l'Université de Bordeaux - Année 2024-2025\par}
+
+    \rule{\linewidth}{0.5mm} \\[1.5cm]
+    
+    \includegraphics[width=0.6\textwidth]{images/Quoridor_1.jpg}
+    
+    \vspace{2cm}
+    
+    {\Large \bfseries Arthur Macdonald, Niels Roudeau\par}
+    
+    \vspace{1cm}
+    
+    
+    \vfill
+    
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+
+\section{Présentation du projet}
+L'objectif de notre projet est d'implémenter un agent intelligent capable de jouer au jeu Corridor, une implémentaion simplifié du jeu Quoridor. 
+Nous avons implémenté plusieurs agents, chacuns utilisant des méthodes d'apprentissages basées sur l'apprentissage par renforcement : 
+
+\begin{itemize}
+    \item \textbf{Q-Learning / Sarsa} (Apprentissage tabulaire)
+    \item \textbf{Deep Q-Network} (Réseau de neurones)
+\end{itemize}
+
+Nos agents comprennent le jeu à l'aide d'un processus de décision Markovien (MDP) la définition et l'implémentation de ce processus font parti de ce rapport.
+
+Nous traiterons dans un premier temps de nos choix d'implémentation pour ces agents.
+
+Enfin, nous présenterons nos résultats expérimentaux obtenus lors de phases d'entrainement et d'évaluation de nos modèles.
+
+\section{Architecture du Projet}
+\lstset{style=treeStyle}
+\begin{lstlisting}
+.
+|-- corridor.py
+|-- corridor_starter.py 
+|-- experiments.ipynb
+|-- start_evaluation.py
+|-- start_training.py   
+|-- models/
+|   |-- __init__.py
+|   |-- base_agent.py
+|   |-- dqn/
+|        |-- __init__.py
+|        |-- action_encoder.py
+|        |-- prioritized_replay.py
+|        |-- dqn_agent.py
+|        |-- dqn_network.py
+|   |-- greedy/
+|        |-- greedy_path_agent.py
+|   |-- qlearning/
+|        |-- qlearning_agent.py
+|   |-- sarsa/
+|        |-- sarsa_agent.py
+|   |-- random/ 
+|        |-- random_agent.py
+|-- saved_models/
+|-- utils/
+|   |-- representation.py
+|   |-- saving.py 
+|   |-- training.py
+|-- projet.pdf
+|-- report
+|   |-- report.pdf
+|   |-- report.tex
+|-- requirements.txt 
+
+\end{lstlisting}
+
+Notre travail comprend:
+\begin{itemize}
+    \item Implémentation de deux agents intelligents suivant les méthodes d'apprentissage tabulaires Q-Learning et Sarsa.
+    \item Implémentation d'un agent utilisant un Deep Q-Network.
+    \item Définition d'un MDP autour du jeu de Corridor.
+    \item \textbf{start\_evaluation.py,  start\_training.py}: programmes utilisables en CLI pour l'entrainement et l'évaluation des modèles.
+\end{itemize}
+
+\section{Définition d'un MDP}
+
+\subsection{Représentation de l'état d'une partie pour Apprentissage tabulaire}
+
+Le principal défi de l'application du Q-Learning au jeu de Corridor réside dans l'explosion combinatoire de l'espace d'états (phénomène du \textit{Curse of Dimensionality}).
+
+Pour pallier à cela, nous avons conçu une représentation compacte, visant à réduire la cardinalité de l'espace tout en conservant les informations stratégiques cruciales. Notre tuple d'état $(S)$ est construit selon les principes suivants:
+
+\begin{itemize}
+    \item \textbf{binning des Murs :} Le nombre exact de murs restants modifie rarement la stratégie optimale. Nous avons donc discrétisé cette valeur en intervalles. L'agent regroupe des états stratégiquement équivalents accélère la convergence de la Q-Table.
+    
+    \item \textbf{Abstraction des obstacles :} Plutôt que d'encoder la position de chaque mur, nous capturons l'impact topologique des murs en calculant la distance du plus court chemin via BFS pour chaque joueur.
+    
+    \item \textbf{Encodage de la topologie locale :} Pour faciliter l'apprentissage des mouvements légaux sans avoir à parser la liste globale des murs, nous incluons un \textit{masque d'adjacence}. Il s'agit d'un encodage binaire représentant les obstacles immédiats (murs ou bords du plateau) autour des deux joueurs. Cela offre à l'agent une "vision locale" immédiate.
+    
+    \item \textbf{Canonicalisation par symétrie :} Le jeu présentant une symétrie centrale, nous normalisons systématiquement l'observation. L'état est toujours représenté du point de vue d'un joueur devant atteindre le bas du plateau.
+    
+    
+\end{itemize}
+
+L'état final est donc un tuple : 
+$$ S = (Pos_{me}, Pos_{opp}, Walls_{me}^{bin}, Dist_{me}, Dist_{opp}, Mask_{me}, Mask_{opp}) $$
+
+Selon nos experimentations et les document scientifiques consultés durant nos travaux, le nombre de murs restants pour l'adversaire n'est pas un élement pertinent à stocker. Il ne fait qu'accélerer l'explosion combinatoire.
+
+
+Notre implémentaion a été dirigée dans l'intêret d'avoir des principes théoriquement "séparés". Par exemple l'ajout d'informations sur les murs feraient perdre sens à notre choix d'utiliser un binning, on se contente d'utiliser des informations simples qui empechent l'agent de se perdre dans ses décisions.
+
+
+\subsection{Représentation de l'état d'une partie pour Apprentissage profond}
+
+Contrairement à l'approche tabulaire où nous avons dû extraire manuellement des caractéristiques de haut niveau (distances, masques), l'approche par Deep Q-Network (DQN) repose sur la capacité des réseaux de neurones convolutifs (CNN) à extraire eux-mêmes les motifs pertinents à partir de données brutes.
+
+Nous avons donc opté pour une représentation qui préserve la \textbf{structure spatiale} du jeu. L'état n'est plus un tuple abstrait, mais un tenseur tridimensionnel de forme $(C \times N \times N)$, analogue à une image avec plusieurs canaux de couleurs.
+
+Notre représentation comporte $C=6$ canaux (feature planes), normalisés entre 0 et 1 pour assurer la stabilité numérique du réseau :
+
+\begin{itemize}
+    \item \textbf{Canaux de Position (2 plans) :} Deux grilles binaires encodant respectivement la position du joueur courant ($P1$) et celle de l'adversaire ($P2$). Cela permet au réseau de situer les agents dans l'espace sans ambiguïté.
+    
+    \item \textbf{Canaux de Topologie (2 plans) :} Deux grilles binaires représentant les murs posés (un plan pour les murs horizontaux, un pour les verticaux). Contrairement à une liste de coordonnées, cette représentation matricielle permet aux filtres de convolution de détecter des motifs locaux comme des "couloirs", des "impasses" ou des "blocages".
+    
+    \item \textbf{Canaux de Contexte (2 plans) :} Le nombre de murs restants est une information scalaire, mais cruciale. Pour l'intégrer dans une architecture convolutionnelle, nous utilisons la technique des "plans scalaires" (utilisée notamment par AlphaGo) : nous remplissons deux plans entiers avec la valeur normalisée du nombre de murs restants (pour soi et pour l'adversaire). Cela fournit un biais constant à chaque neurone de la couche d'entrée, conditionnant l'analyse spatiale aux ressources disponibles.
+\end{itemize}
+
+Cette architecture permet un apprentissage \textit{end-to-end} : nous ne disons pas à l'agent "tu es loin de l'arrivée", mais nous lui donnons une image du plateau et le laissons apprendre, via les couches cachées, les concepts de distance, de chemin critique et de connect% filepath: /home/niels/CorridorAIRL/report/report.tex
+% ...existing code...
+\subsection{Représentation de l'état d'une partie pour Apprentissage profond}
+
+Contrairement à l'approche tabulaire où nous avons dû extraire manuellement des caractéristiques de haut niveau (distances, masques), l'approche par Deep Q-Network (DQN) repose sur la capacité des réseaux de neurones convolutifs (CNN) à extraire eux-mêmes les motifs pertinents à partir de données brutes.
+
+Nous avons donc opté pour une représentation qui préserve la \textbf{structure spatiale} du jeu. L'état n'est plus un tuple abstrait, mais un tenseur tridimensionnel de forme $(C \times N \times N)$, analogue à une image avec plusieurs canaux de couleurs.
+
+Notre représentation comporte $C=6$ canaux (feature planes), normalisés entre 0 et 1 pour assurer la stabilité numérique du réseau :
+
+\begin{itemize}
+    \item \textbf{Canaux de Position (2 plans) :} Deux grilles binaires encodant respectivement la position du joueur courant ($P1$) et celle de l'adversaire ($P2$). Cela permet au réseau de situer les agents dans l'espace sans ambiguïté.
+    
+    \item \textbf{Canaux de Topologie (2 plans) :} Deux grilles binaires représentant les murs posés (un plan pour les murs horizontaux, un pour les verticaux). Contrairement à une liste de coordonnées, cette représentation matricielle permet aux filtres de convolution de détecter des motifs locaux comme des "couloirs", des "impasses" ou des "blocages".
+    
+    \item \textbf{Canaux de Contexte (2 plans) :} Le nombre de murs restants est une information scalaire, mais cruciale. Pour l'intégrer dans une architecture convolutionnelle, nous utilisons la technique des "plans scalaires" (utilisée notamment par AlphaGo) : nous remplissons deux plans entiers avec la valeur normalisée du nombre de murs restants (pour soi et pour l'adversaire). Cela fournit un biais constant à chaque neurone de la couche d'entrée, conditionnant l'analyse spatiale aux ressources disponibles.
+\end{itemize}
+
+Cette architecture permet un apprentissage \textit{end-to-end} : nous ne disons pas à l'agent "tu es loin de l'arrivée", mais nous lui donnons une image du plateau et le laissons apprendre, via les couches cachées, les concepts de distance, de chemin critique et de connectivité
+
+
+
+\section{Définition des Agents}
+Cette partie détaille les différentes approches et algorithmes utilisés pour concevoir nos agents intelligents.
+
+    \subsection{Agent aléatoire ``Random Agent''}
+    Déjà fournit pour le projet, cet agent se contente simplement, lors que c'est à son tour de jouer de choisir un coup aléatoire parmis l'ensemble de ces coups légaux.
+    \subsection{Agent Cupide ``Greedy Path Agent''}
+    Déjà fournit pour le projet, cet agent agit selon une heuristique simple selon laquelle il essaie de minimiser sa distance à la ligne d'arrivée coup après coup. 
+    Il peut néanmoins décider selon une loi de Bernouilli de poser un mur aléatoire parmis les coups légaux.
+
+    Si aucun des coups légaux n'est un déplacement il décide de poser un mur aléatoirement (si il lui en reste à poser).
+    
+    \subsection{Agents à Apprentissage tabulaire}
+    les implémentations des méthodes Sarsa et Qlearning sont proches et se font chacunes en deux fonctions:
+    \begin{itemize}
+        \item \textbf{select\_action()} qui choisit parmis les actions légales la plus avantageuse selon la Q-table et qui explore, ou non lors des phases d'entrainement avec un coup légal aléatoire.
+        \item \textbf{update()}, pour la mise à jour de l'état des connaissances par la Q-table.
+    \end{itemize}
+    L'état des connaissances est stocké dans une Q-table définie comme une dictionnaire natif python \textit{defaultdict(float)}.
+
+    Au fur et à mesure de la partie les agents enregistrent pour chaque couple (état,action) une valeur. C'est ici que les agents divergent sur la fonction \textbf{update()}:
+    Q-Learning vise l'optimalité théorique, tandis que SARSA reflète la politique réelle de l'agent.
+    \subsection{Agent 3 : Deep Q-Network (DQN)}
+
+\section{Resultats expérimentaux}
+\subsection{Entrainement}
+\subsection{Evaluation}
+
+\end{document}

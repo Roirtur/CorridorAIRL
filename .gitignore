@@ -83,6 +83,15 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+#latex
+.toc
+.log
+.fls 
+.out
+.aux
+.fdb_latexmk
+.synctex.gz
+
 # IPython
 profile_default/
 ipython_config.py

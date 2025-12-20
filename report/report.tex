@@ -1,0 +1,220 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel} % Pour la typographie française
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{verbatim}
+\usepackage{amsmath}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{changepage}
+\usepackage{adjustbox}
+\usepackage{hyperref}
+\usepackage{geometry} % Pour gérer les marges
+\usepackage{enumitem}
+
+
+\lstdefinestyle{treeStyle}{
+    basicstyle=\small\ttfamily,
+    breaklines=true,
+    frame=single,
+    frameround=tttt,
+    rulesepcolor=\color{gray!50},
+    captionpos=b,
+    numbers=none
+}
+
+\geometry{hmargin=2.5cm,vmargin=2.5cm}
+
+\begin{document}
+\begin{titlepage}
+    \newcommand{\HRule}{\rule{\linewidth}{0.5mm}} 
+    
+    \center 
+    
+    \textsc{\LARGE Université de Bordeaux}\\[1.5cm] 
+    \textsc{\Large Master 2 Informatique - Intelligence Artificielle}\\[0.5cm] 
+    \textsc{\large Apprentissage par Renforcement}\\[0.5cm]
+    
+    \vspace{1cm}
+    \HRule \\[0.4cm]
+    { \huge \bfseries Agent Intelligent pour le Jeu de Corridor}\\[0.4cm] 
+    \HRule \\[1.5cm]
+    
+    \includegraphics[width=0.6\textwidth]{images/Quoridor_1.jpg}\\[1.5cm]
+    
+    \begin{minipage}{0.4\textwidth}
+        \begin{flushleft} \large
+        \emph{Auteurs :}\\
+        Arthur \textsc{Macdonald}\\
+        Niels \textsc{Roudeau}
+        \end{flushleft}
+    \end{minipage}
+    ~
+    \begin{minipage}{0.4\textwidth}
+        \begin{flushright} \large
+        \emph{Date :} \\
+        2025 -- 2026
+        \end{flushright}
+    \end{minipage}\\[2cm]
+    
+    \vfill 
+    
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+
+\section{Présentation du projet}
+L'objectif de notre projet est d'implémenter un agent intelligent capable de jouer au jeu Corridor, une implémentaion simplifié du jeu Quoridor. 
+Nous avons implémenté plusieurs agents, chacuns utilisant des méthodes d'apprentissages basées sur l'apprentissage par renforcement : 
+
+\begin{itemize}
+    \item \textbf{Q-Learning / Sarsa} (Apprentissage tabulaire)
+    \item \textbf{Deep Q-Network} (Réseau de neurones)
+\end{itemize}
+
+Nos agents comprennent le jeu à l'aide d'un processus de décision Markovien (MDP) la définition et l'implémentation de ce processus font parti de ce rapport.
+
+Nous traiterons dans un premier temps de nos choix d'implémentation pour ces agents.
+
+Enfin, nous présenterons nos résultats expérimentaux obtenus lors de phases d'entrainement et d'évaluation de nos modèles.
+
+\section{Architecture du Projet}
+Pour alléger le rapport, l'arbre détaillé de l'arborescence du dépôt a été retiré. Le code complet et la structure du projet sont disponibles en ligne : \href{https://github.com/Roirtur/CorridorAIRL}{https://github.com/Roirtur/CorridorAIRL}.
+
+Les composants principaux sont :
+\begin{itemize}
+    \item le moteur de jeu : \texttt{corridor.py} ;
+    \item des scripts utilitaires : \texttt{start\_training.py}, \texttt{start\_evaluation.py} et \texttt{corridor\_starter.py} ;
+    \item la mise en oeuvre des agents dans le dossier \texttt{models/} (agents tabulaires, DQN, heuristiques) ;
+    \item les notebooks d'analyse : \texttt{experiments.ipynb} ;
+    \item utilitaires divers dans \texttt{utils/} et modèles sauvegardés dans \texttt{saved\_models/}.
+\end{itemize}
+
+Notre travail comprend:
+\begin{itemize}
+    \item Implémentation de deux agents intelligents suivant les méthodes d'apprentissage tabulaires Q-Learning et Sarsa.
+    \item Implémentation d'un agent utilisant un Deep Q-Network.
+    \item Définition d'un MDP autour du jeu de Corridor.
+    \item \textbf{start\_evaluation.py,  start\_training.py}: programmes utilisables en CLI pour l'entrainement et l'évaluation des modèles.
+    \item \textbf{experiments.ipynb}: Notebook Jupyter sur nos procédés experimentaux et leurs résultats 
+\end{itemize}
+
+\section{Définition d'un MDP}
+
+\subsection{Représentation de l'état d'une partie pour Apprentissage tabulaire}
+
+La difficulté principale dans l'apprentissage tabulaire du jeu Corridor est d'éviter une explosion combinatoire de l'espace d'états (\textit{Curse of Dimensionality}).
+
+Pour pallier à cela, nous avons conçu une représentation compacte, visant à réduire la cardinalité de l'espace tout en conservant les informations stratégiques cruciales. Notre tuple d'état $(S)$ est construit selon les principes suivants:
+
+\begin{itemize}
+    \item \textbf{Binning des Murs :} Le nombre exact de murs restants modifie rarement la stratégie optimale. Nous avons donc discrétisé cette valeur en intervalles. L'agent regroupe des états stratégiquement équivalents et accélère donc la convergence de la Q-Table.
+    
+    \item \textbf{Abstraction des obstacles :} Plutôt que d'encoder la position de chaque mur, nous capturons l'impact topologique des murs en calculant la distance du plus court chemin à l'arrivée via BFS pour chaque joueur.
+    
+    \item \textbf{Encodage de la topologie locale :} Pour faciliter l'apprentissage des mouvements légaux sans avoir à parser la liste globale des murs, nous incluons un \textit{masque d'adjacence}. Il s'agit d'un encodage binaire représentant les obstacles immédiats (murs ou bords du plateau) autour des deux joueurs. Cela offre à l'agent une "vision locale" immédiate.
+    
+    \item \textbf{Symétrie de plateau:} Le jeu présentant une symétrie centrale, nous normalisons systématiquement l'observation. L'état est toujours représenté du point de vue d'un joueur devant atteindre le bas du plateau.
+    
+\end{itemize}
+
+L'état final est donc un tuple : 
+$$ S = (Pos_{me}, Pos_{opp}, Walls_{me}^{bin}, Dist_{me}, Dist_{opp}, Mask_{me}, Mask_{opp}) $$
+
+Selon nos expérimentations et les documents scientifiques consultés durant nos travaux, le nombre de murs restants pour l'adversaire n'est pas un élément pertinent à utiliser. Il ne fait qu'accélerer l'explosion combinatoire.
+Selon nos expérimentations et les documents scientifiques consultés durant nos travaux (voir notamment Glendenning\footnote{Glendenning, 2000. Undergraduate Thesis. \url{https://www.labri.fr/perso/renault/working/teaching/projets/files/glendenning_ugrad_thesis.pdf}}), le nombre de murs restants pour l'adversaire n'est pas, dans notre configuration, un facteur décisif et contribue surtout à l'explosion combinatoire si on l'intègre finement.
+
+
+
+Notre implémentaion a été dirigée dans l'intêret d'avoir des principes théoriquement "séparés". Par exemple l'ajout d'informations sur les murs feraient perdre sens à notre choix d'utiliser un binning, on se contente d'utiliser des informations simples qui empêchent l'agent de se perdre dans ses décisions.
+
+
+\subsection{Représentation de l'état d'une partie pour Apprentissage profond}
+
+
+Contrairement à l'approche tabulaire où nous avons dû extraire manuellement des caractéristiques de haut niveau (distances, masques), l'approche par Deep Q-Network (DQN) approxime la fonction de valeur d'action à l'aide d'un réseau de neurones. Nous avons choisi d'utiliser un réseau de neurones convolutif (CNN) car le jeu se joue sur une grille et ce type d'architecture est particulièrement adapté pour exploiter la structure spatiale et les motifs locaux (couloirs, impasses). Cette approche nous a semblé cohérente avec la littérature et ressources en ligne consultées durant le projet.
+
+Nous avons donc par découlement opté pour une représentation qui préserve la structure spatiale du jeu. L'état n'est plus un tuple abstrait, mais un tenseur de forme $(C \times N \times N)$.
+
+Notre représentation comporte $C=6$ canaux, normalisés entre 0 et 1 pour assurer la stabilité numérique du réseau :
+
+\begin{itemize}
+    \item \textbf{Canaux de Position (2 plans) :} Deux grilles binaires encodant respectivement la position du joueur courant ($P1$) et celle de l'adversaire ($P2$). Cela permet au réseau de situer les agents dans l'espace sans ambiguïté.
+    
+    \item \textbf{Canaux de Topologie (2 plans) :} Deux grilles binaires représentant les murs posés (un plan pour les murs horizontaux, un pour les verticaux). Contrairement à une liste de coordonnées, cette représentation matricielle permet aux filtres de convolution de détecter des motifs locaux comme des "couloirs", des "impasses" ou des "blocages".
+    
+    \item \textbf{Canaux de Contexte (2 plans) :} Le nombre de murs restants est une information scalaire, mais cruciale. Pour l'intégrer dans une architecture convolutionnelle, nous utilisons la technique des "plans scalaires" (utilisée notamment par AlphaGo) : nous remplissons deux plans entiers avec la valeur normalisée du nombre de murs restants (pour soi et pour l'adversaire). Cela fournit un biais constant à chaque neurone de la couche d'entrée, conditionnant l'analyse spatiale aux ressources disponibles.
+\end{itemize}
+
+\subsection{Système de Récompenses}
+
+Conformément à l'implémentation du moteur, les récompenses terminales sont :
+\[
+r_T = 
+\begin{cases}
++1.0 & \text{si l'agent gagne au coup terminal},\\[2pt]
+-1.0 & \text{si l'agent perd},\\[2pt]
+-0.5 & \text{en cas de match nul / timeout (pour certaines expériences).}
+\end{cases}
+\]
+
+Pour les agents tabulaires (Q-Learning, SARSA) nous avons ajouté un terme de shaping basé sur la variation de la distance au but calculée par BFS. À chaque pas pertinent de l'agent, la récompense non terminale est :
+\[
+r_t = \alpha \cdot \big(d_{t-1} - d_t\big) + c_{\text{step}},
+\]
+avec les hyper-paramètres utilisés dans le code :
+\begin{itemize}
+    \item $\alpha = 0.1$ (gain sur la réduction de la distance) ;
+    \item $c_{\text{step}} = -0.01$ (petite pénalité de pas pour décourager les aller-retour).
+\end{itemize}
+Ainsi, chaque action qui rapproche l'agent de son objectif reçoit une récompense positive proportionnelle à la diminution de la distance; les actions qui l'éloignent reçoivent une récompense négative relative. Ce shaping est appliqué uniquement pendant l'entraînement tabulaire afin d'accélérer la propagation des valeurs dans la Q-table.
+
+\paragraph{Justification et limites}
+Le shaping par différence de distance satisfait l'intuition stratégique (progresser vers la ligne adverse) et réduit la variance des retours en fournissant un signal dense. Néanmoins :
+\begin{itemize}
+    \item il peut modifier la politique optimale si mal calibré (risque d'introduire un biais vers des trajectoires ``courtes'' mais tactiquement faibles) ;
+    \item il dépend de la métrique de distance choisie (ici shortest path via BFS) — lorsque les murs sont posés l'estimation peut varier brutalement ;
+    \item il n'est appliqué qu'aux agents tabulaires : les agents DQN, traitant une représentation spatiale riche, reçoivent par défaut les récompenses fournies par l'environnement (0 pour coups non-terminaux, +1/-1 terminaux). Conformément aux expérimentations présentées dans \texttt{experiments.ipynb}, nous n'avons pas utilisé de shaping pour la plupart des entraînements DQN présentés (les courbes et évaluations publiées correspondent à cette configuration). Il reste toutefois possible d'ajouter le même shaping pour un entraînement DQN alternatif.
+\end{itemize}
+
+
+\section{Résultats expérimentaux}
+
+L'ensemble des expériences et résultats détaillés sont présentés dans le notebook \textbf{experiments.ipynb} (disponible dans le dépôt). Nous résumons ici les principaux enseignements et observations :
+
+\subsection*{Méthodologie expérimentale}
+\begin{enumerate}[label=\arabic*.]
+    \item \textbf{Entraînement des agents} :
+    \begin{itemize}
+        \item Les courbes de récompense sont enregistrées à chaque épisode et lissées pour une meilleure lisibilité.
+        \item Plusieurs stratégies d'entraînement sont testées : contre un adversaire aléatoire (Random), contre un adversaire Greedy, ou via un curriculum (Random $\rightarrow$ Greedy $\rightarrow$ Mix).
+    \end{itemize}
+    \item \textbf{Évaluation} :
+    \begin{itemize}
+        \item Chaque agent est évalué sur 500 parties contre \texttt{RandomAgent} et \texttt{GreedyPathAgent}, en alternant le joueur qui commence.
+        \item Des tournois agent vs agent sont organisés (200 parties par duel) pour comparer directement les stratégies apprises.
+    \end{itemize}
+\end{enumerate}
+
+\subsection*{Principaux résultats}
+\begin{itemize}
+    \item \textbf{DQN vs tabulaire} : Les agents DQN surpassent les agents tabulaires (Q-Learning, Sarsa) sur les grands plateaux et montrent une meilleure robustesse face à la diversité des situations.
+    \item \textbf{Effet du curriculum} : Pour les agents tabulaires, l'entraînement progressif (curriculum) améliore nettement la capacité à battre différents types d'adversaires. Pour DQN, un entraînement trop long contre Greedy peut nuire à la généralisation.
+    \item \textbf{Diversité des stratégies} : Les agents DQN entraînés uniquement contre Random développent parfois des stratégies plus variées et efficaces que ceux sur-entraînés contre Greedy.
+    \item \textbf{Classement} : Les tournois montrent que DQN est globalement supérieur, suivi de Sarsa puis Q-Learning, mais la hiérarchie peut varier selon la configuration d'entraînement.
+\end{itemize}
+
+\subsection*{Reproductibilité}
+Tous les scripts, modèles sauvegardés et logs d'entraînement sont fournis dans le dépôt. Il est possible de reproduire l'ensemble des figures et évaluations à partir des fichiers fournis.
+
+Pour plus de détails, de graphiques et d'exemples de parties, se référer au notebook \texttt{experiments.ipynb}.
+
+\end{document}

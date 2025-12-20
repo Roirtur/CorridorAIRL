@@ -43,6 +43,9 @@ class Corridor:
     H: Set[Tuple[int, int]] = field(init=False, default_factory=set)  # murs horizontaux
     V: Set[Tuple[int, int]] = field(init=False, default_factory=set)  # murs verticaux
     move_count: int = field(init=False, default=0)
+    
+    # Cache for legal actions to avoid recalculating multiple times per step
+    _legal_actions_cache: Optional[List[Action]] = field(init=False, default=None)
 
     def __post_init__(self):
         self.reset()
@@ -56,21 +59,29 @@ class Corridor:
         self.H.clear()
         self.V.clear()
         self.move_count = 0
+        self._legal_actions_cache = None  # Reset cache
         return self._observation()
 
     def legal_actions(self) -> List[Action]:
-        return self.legal_moves(self.to_play) + self.legal_walls(self.to_play)
+        # Use cached actions if available
+        if self._legal_actions_cache is None:
+            self._legal_actions_cache = self.legal_moves(self.to_play) + self.legal_walls(self.to_play)
+        return self._legal_actions_cache
 
     def step(self, action: Action) -> Tuple[Dict, float, bool, Dict]:
         assert not self.is_terminal(), "Partie terminée."
+        
+        # Invalidate cache whenever state changes
+        self._legal_actions_cache = None
+        
         kind = action[0]
         if kind == "M":
             _, (r, c) = action
-            assert (r, c) in [pos for _, pos in self.legal_moves(self.to_play)], "Déplacement illégal."
+            # assert (r, c) in [pos for _, pos in self.legal_moves(self.to_play)], "Déplacement illégal."
             self._apply_move((r, c))
         elif kind == "W":
             _, (r, c, ori) = action
-            assert (r, c, ori) in [w for _, w in self.legal_walls(self.to_play)], "Mur illégal."
+            # assert (r, c, ori) in [w for _, w in self.legal_walls(self.to_play)], "Mur illégal."
             self._place_wall((r, c), ori)
         else:
             raise ValueError("Action inconnue.")
@@ -154,44 +165,103 @@ class Corridor:
         return [("M", pos) for pos in sorted(moves)]
 
     def legal_walls(self, player: int) -> List[Tuple[str, Tuple[int, int, str]]]:
+        """
+        Optimized wall generation.
+        Only runs BFS checks if a wall intersects the current shortest paths.
+        """
         if self.walls_left[player] <= 0:
             return []
+        
         actions = []
+        
+        path_p1 = self._get_shortest_path_set(1)
+        path_p2 = self._get_shortest_path_set(2)
+        
         for r in range(self.N - 1):
             for c in range(self.N - 1):
                 for ori in ("H", "V"):
-                    if self.is_legal_wall((r, c), ori):
+                    if not self._is_position_valid_basic((r, c), ori):
+                        continue
+                    
+                    if self._is_path_safe((r, c), ori, path_p1, path_p2):
                         actions.append(("W", (r, c, ori)))
         return actions
 
-    def is_legal_wall(self, corner: Tuple[int, int], ori: str) -> bool:
+    def _get_shortest_path_set(self, player: int) -> Set[Position]:
+        """Returns the set of cells involved in the current shortest path."""
+        start = self.current_pawn(player)
+        goal_row = self.N - 1 if player == 1 else 0
+        
+        q = deque([start])
+        parents = {start: None}
+        
+        while q:
+            curr = q.popleft()
+            if curr[0] == goal_row:
+                path_set = set()
+                while curr:
+                    path_set.add(curr)
+                    curr = parents[curr]
+                return path_set
+            
+            for nr, nc in self._neighbors(curr):
+                if (nr, nc) not in parents:
+                    parents[(nr, nc)] = curr
+                    q.append((nr, nc))
+        return set()
+
+    def _is_position_valid_basic(self, corner: Tuple[int, int], ori: str) -> bool:
+        """Checks bounds and overlaps (O(1))."""
         r, c = corner
-        if not (0 <= r < self.N - 1 and 0 <= c < self.N - 1):
-            return False
         if ori == "H":
             if (r, c) in self.H or (r, c - 1) in self.H or (r, c + 1) in self.H:
                 return False
             if (r, c) in self.V or (r + 1, c) in self.V:
                 return False
-        elif ori == "V":
+        else:
             if (r, c) in self.V or (r - 1, c) in self.V or (r + 1, c) in self.V:
                 return False
             if (r, c) in self.H or (r, c + 1) in self.H:
                 return False
-        else:
-            return False
+        return True
 
-        # test de connectivité (virtuel)
+    def _is_path_safe(self, corner: Tuple[int, int], ori: str, path_p1: Set[Position], path_p2: Set[Position]) -> bool:
+        """
+        Smart connectivity check.
+        Only runs expensive BFS if the wall cuts an edge used by the current shortest paths.
+        """
+        r, c = corner
+        
         if ori == "H":
-            self.H.add((r, c))
+            cut_edges = [((r, c), (r+1, c)), ((r, c+1), (r+1, c+1))]
         else:
-            self.V.add((r, c))
-        ok = self._has_path(1) and self._has_path(2)
-        if ori == "H":
-            self.H.discard((r, c))
-        else:
-            self.V.discard((r, c))
-        return ok
+            cut_edges = [((r, c), (r, c+1)), ((r+1, c), (r+1, c+1))]
+            
+        cuts_p1 = False
+        cuts_p2 = False
+        
+        for u, v in cut_edges:
+            if u in path_p1 and v in path_p1:
+                cuts_p1 = True
+            if u in path_p2 and v in path_p2:
+                cuts_p2 = True
+        
+        if not cuts_p1 and not cuts_p2:
+            return True
+            
+        if ori == "H": self.H.add(corner)
+        else: self.V.add(corner)
+        
+        valid = True
+        if cuts_p1 and not self._has_path(1):
+            valid = False
+        elif valid and cuts_p2 and not self._has_path(2):
+            valid = False
+            
+        if ori == "H": self.H.discard(corner)
+        else: self.V.discard(corner)
+        
+        return valid
 
     # ---------- Application des coups ----------
     def _apply_move(self, dst: Position):

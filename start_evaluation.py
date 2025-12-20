@@ -210,7 +210,7 @@ def run_evaluation(agent, opponent, env, n_games, starting_policy, n_boards_to_s
         # Run game
         obs = env.reset()
         steps = 0
-        max_steps = 250
+        max_steps = 100
         
         while steps < max_steps:
             current_player = obs["to_play"]

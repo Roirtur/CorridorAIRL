@@ -71,7 +71,7 @@ def training_loop(
     opponents_schedule: List[Tuple[Union[BaseAgent, List[BaseAgent]], int]],
     save_path_model: str,
     save_path_data: str,
-    eval_interval: int = 250,
+    eval_interval: int = 100,
     save_interval: int = 1000,
     min_epsilon: float = 0.05,
     initial_epsilon: float = 1.0

@@ -163,7 +163,7 @@ class DQNAgent(BaseAgent):
         env: Corridor,
         opponent: BaseAgent,
         agent_player: int = 1,
-        max_steps: int = 250
+        max_steps: int = 100
     ) -> Dict:
         obs = env.reset()
         
@@ -173,7 +173,6 @@ class DQNAgent(BaseAgent):
         prev_state = None
         prev_action_idx = None
         prev_reward = .0
-        prev_distance = env.shortest_path_length(agent_player) 
 
         while steps < max_steps:
             current_player = obs["to_play"]
@@ -194,13 +193,8 @@ class DQNAgent(BaseAgent):
             next_obs, _, done, info = env.step(action)
             
             if is_learning:
-                current_distance = env.shortest_path_length(agent_player)
                 
-                dist_now = current_distance if current_distance is not None else 99
-                dist_prev = prev_distance if prev_distance is not None else 99
-                
-                distance_delta = dist_prev - dist_now
-                next_reward = distance_delta * 0.1 - 0.01
+                next_reward = -0.01
 
                 action_idx = self.action_encoder.encode(action)
                 
@@ -218,7 +212,6 @@ class DQNAgent(BaseAgent):
                 
                 prev_state = current_state
                 prev_action_idx = action_idx
-                prev_distance = dist_now
                 prev_reward = next_reward
 
             if done:

@@ -187,22 +187,34 @@ Le shaping par différence de distance satisfait l'intuition stratégique (progr
 
 
 \section{Résultats expérimentaux}
-L'ensemble de nos procédés et résultats expérimentaux sont regroupés dans le fichier \textbf{experiments.ipynb} (répertoire racine du dépôt). Ci-dessous un résumé et quelques corrections apportées après analyse du notebook :
 
-\begin{itemize}
-    \item \textbf{Courbes d'entraînement :} nous traçons les séries de récompenses enregistrées pendant l'entraînement et appliquons un lissage (fenêtre de 50 épisodes) pour rendre les tendances lisibles. Les courbes montrent l'évolution normale pour les entraînements contre \textit{Random} et des chutes de performance lors du passage à un adversaire \textit{Greedy} avant une remontée lorsque l'entraînement devient mixte.
-    \item \textbf{Évaluations vs baselines :} pour comparer les agents, chaque modèle est évalué contre \texttt{RandomAgent} et \texttt{GreedyPathAgent}. Les évaluations présentées dans le notebook utilisent typiquement \texttt{N\\_GAMES = 500} parties pour chaque évaluation, alternant le joueur qui commence.
-    \item \textbf{Matchs agent vs agent :} des tournois directs entre modèles pré-entraînés sont exécutés (paramètre \texttt{N\\_GAMES\_MATCHUP = 200} dans le notebook) pour établir un classement relatif des approches.
-    \item \textbf{Observations principales} (résumées et corrigées selon les résultats réels du notebook) :
+L'ensemble des expériences et résultats détaillés sont présentés dans le notebook \textbf{experiments.ipynb} (disponible dans le dépôt). Nous résumons ici les principaux enseignements et observations :
+
+\subsection*{Méthodologie expérimentale}
+\begin{enumerate}[label=\arabic*.]
+    \item \textbf{Entraînement des agents} :
     \begin{itemize}
-        \item Les agents DQN obtiennent globalement de meilleures performances que les agents tabulaires sur des plateaux de taille supérieure ; ils sont aussi plus robustes quand l'espace d'états est large.
-        \item L'entraînement uniquement contre \texttt{Random} donne parfois des agents DQN très diversifiés et performants ; en revanche, un entraînement trop long uniquement contre \texttt{Greedy} peut réduire la capacité du modèle à généraliser (comportement observé dans certaines expériences du notebook).
-        \item Pour les agents tabulaires (Q-Learning, Sarsa), la stratégie de curriculum mixte (Random -> Greedy -> Mix) apparaît comme la plus solide dans nos expérimentations, conduisant souvent à de meilleurs taux de victoire contre les deux baselines.
-        \item Le notebook fournit des comparaisons détaillées (graphiques et tables) et des exemples de parties ; ces éléments ont été utilisés pour corriger et clarifier les affirmations de ce rapport.
+        \item Les courbes de récompense sont enregistrées à chaque épisode et lissées pour une meilleure lisibilité.
+        \item Plusieurs stratégies d'entraînement sont testées : contre un adversaire aléatoire (Random), contre un adversaire Greedy, ou via un curriculum (Random $\rightarrow$ Greedy $\rightarrow$ Mix).
     \end{itemize}
-    \item \textbf{Réplicabilité :} les notebooks et scripts d'entraînement sauvegardent les modèles (dans \texttt{saved\_models/}) et les fichiers JSON de logs qui permettent de reconstruire les figures et évaluations présentées.
+    \item \textbf{Évaluation} :
+    \begin{itemize}
+        \item Chaque agent est évalué sur 500 parties contre \texttt{RandomAgent} et \texttt{GreedyPathAgent}, en alternant le joueur qui commence.
+        \item Des tournois agent vs agent sont organisés (200 parties par duel) pour comparer directement les stratégies apprises.
+    \end{itemize}
+\end{enumerate}
+
+\subsection*{Principaux résultats}
+\begin{itemize}
+    \item \textbf{DQN vs tabulaire} : Les agents DQN surpassent les agents tabulaires (Q-Learning, Sarsa) sur les grands plateaux et montrent une meilleure robustesse face à la diversité des situations.
+    \item \textbf{Effet du curriculum} : Pour les agents tabulaires, l'entraînement progressif (curriculum) améliore nettement la capacité à battre différents types d'adversaires. Pour DQN, un entraînement trop long contre Greedy peut nuire à la généralisation.
+    \item \textbf{Diversité des stratégies} : Les agents DQN entraînés uniquement contre Random développent parfois des stratégies plus variées et efficaces que ceux sur-entraînés contre Greedy.
+    \item \textbf{Classement} : Les tournois montrent que DQN est globalement supérieur, suivi de Sarsa puis Q-Learning, mais la hiérarchie peut varier selon la configuration d'entraînement.
 \end{itemize}
 
-Pour plus de détails techniques et figures, voir \texttt{experiments.ipynb} qui contient le code exact des évaluations et les résultats bruts utilisés pour produire ces conclusions.
+\subsection*{Reproductibilité}
+Tous les scripts, modèles sauvegardés et logs d'entraînement sont fournis dans le dépôt. Il est possible de reproduire l'ensemble des figures et évaluations à partir des fichiers fournis.
+
+Pour plus de détails, de graphiques et d'exemples de parties, se référer au notebook \texttt{experiments.ipynb}.
 
 \end{document}

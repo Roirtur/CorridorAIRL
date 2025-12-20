@@ -18,12 +18,11 @@
 \usepackage{geometry} % Pour gérer les marges
 \usepackage{enumitem}
 
-\usetikzlibrary{trees}
 
 \lstdefinestyle{treeStyle}{
     basicstyle=\small\ttfamily,
     breaklines=true,
-    frame=single, % Ajoute un cadre
+    frame=single,
     frameround=tttt,
     rulesepcolor=\color{gray!50},
     captionpos=b,
@@ -88,43 +87,16 @@ Nous traiterons dans un premier temps de nos choix d'implémentation pour ces ag
 Enfin, nous présenterons nos résultats expérimentaux obtenus lors de phases d'entrainement et d'évaluation de nos modèles.
 
 \section{Architecture du Projet}
-\lstset{style=treeStyle}
-\begin{lstlisting}
-.
-|-- corridor.py
-|-- corridor_starter.py 
-|-- experiments.ipynb
-|-- start_evaluation.py
-|-- start_training.py   
-|-- models/
-|   |-- __init__.py
-|   |-- base_agent.py
-|   |-- dqn/
-|        |-- __init__.py
-|        |-- action_encoder.py
-|        |-- prioritized_replay.py
-|        |-- dqn_agent.py
-|        |-- dqn_network.py
-|   |-- greedy/
-|        |-- greedy_path_agent.py
-|   |-- qlearning/
-|        |-- qlearning_agent.py
-|   |-- sarsa/
-|        |-- sarsa_agent.py
-|   |-- random/ 
-|        |-- random_agent.py
-|-- saved_models/
-|-- utils/
-|   |-- representation.py
-|   |-- saving.py 
-|   |-- training.py
-|-- projet.pdf
-|-- report
-|   |-- report.pdf
-|   |-- report.tex
-|-- requirements.txt 
+Pour alléger le rapport, l'arbre détaillé de l'arborescence du dépôt a été retiré. Le code complet et la structure du projet sont disponibles en ligne : \href{https://github.com/Roirtur/CorridorAIRL}{https://github.com/Roirtur/CorridorAIRL}.
 
-\end{lstlisting}
+Les composants principaux sont :
+\begin{itemize}
+    \item le moteur de jeu : \texttt{corridor.py} ;
+    \item des scripts utilitaires : \texttt{start\_training.py}, \texttt{start\_evaluation.py} et \texttt{corridor\_starter.py} ;
+    \item la mise en oeuvre des agents dans le dossier \texttt{models/} (agents tabulaires, DQN, heuristiques) ;
+    \item les notebooks d'analyse : \texttt{experiments.ipynb} ;
+    \item utilitaires divers dans \texttt{utils/} et modèles sauvegardés dans \texttt{saved\_models/}.
+\end{itemize}
 
 Notre travail comprend:
 \begin{itemize}
@@ -158,6 +130,8 @@ L'état final est donc un tuple :
 $$ S = (Pos_{me}, Pos_{opp}, Walls_{me}^{bin}, Dist_{me}, Dist_{opp}, Mask_{me}, Mask_{opp}) $$
 
 Selon nos expérimentations et les documents scientifiques consultés durant nos travaux, le nombre de murs restants pour l'adversaire n'est pas un élément pertinent à utiliser. Il ne fait qu'accélerer l'explosion combinatoire.
+Selon nos expérimentations et les documents scientifiques consultés durant nos travaux (voir notamment Glendenning\footnote{Glendenning, 2000. Undergraduate Thesis. \url{https://www.labri.fr/perso/renault/working/teaching/projets/files/glendenning_ugrad_thesis.pdf}}), le nombre de murs restants pour l'adversaire n'est pas, dans notre configuration, un facteur décisif et contribue surtout à l'explosion combinatoire si on l'intègre finement.
+
 
 
 Notre implémentaion a été dirigée dans l'intêret d'avoir des principes théoriquement "séparés". Par exemple l'ajout d'informations sur les murs feraient perdre sens à notre choix d'utiliser un binning, on se contente d'utiliser des informations simples qui empêchent l'agent de se perdre dans ses décisions.
@@ -165,9 +139,10 @@ Notre implémentaion a été dirigée dans l'intêret d'avoir des principes thé
 
 \subsection{Représentation de l'état d'une partie pour Apprentissage profond}
 
-Contrairement à l'approche tabulaire où nous avons dû extraire manuellement des caractéristiques de haut niveau (distances, masques), l'approche par Deep Q-Network (DQN) repose sur la capacité des réseaux de neurones convolutifs (CNN) à extraire eux-mêmes les motifs pertinents à partir de données brutes.
 
-Nous avons donc opté pour une représentation qui préserve la structure spatiale du jeu. L'état n'est plus un tuple abstrait, mais un tenseur de forme $(C \times N \times N)$.
+Contrairement à l'approche tabulaire où nous avons dû extraire manuellement des caractéristiques de haut niveau (distances, masques), l'approche par Deep Q-Network (DQN) approxime la fonction de valeur d'action à l'aide d'un réseau de neurones. Nous avons choisi d'utiliser un réseau de neurones convolutif (CNN) car le jeu se joue sur une grille et ce type d'architecture est particulièrement adapté pour exploiter la structure spatiale et les motifs locaux (couloirs, impasses). Cette approche nous a semblé cohérente avec la littérature et ressources en ligne consultées durant le projet.
+
+Nous avons donc par découlement opté pour une représentation qui préserve la structure spatiale du jeu. L'état n'est plus un tuple abstrait, mais un tenseur de forme $(C \times N \times N)$.
 
 Notre représentation comporte $C=6$ canaux, normalisés entre 0 et 1 pour assurer la stabilité numérique du réseau :
 
@@ -207,11 +182,27 @@ Le shaping par différence de distance satisfait l'intuition stratégique (progr
 \begin{itemize}
     \item il peut modifier la politique optimale si mal calibré (risque d'introduire un biais vers des trajectoires ``courtes'' mais tactiquement faibles) ;
     \item il dépend de la métrique de distance choisie (ici shortest path via BFS) — lorsque les murs sont posés l'estimation peut varier brutalement ;
-    \item il n'est appliqué qu'aux agents tabulaires : les agents DQN, traitant une représentation spatiale riche, reçoivent par défaut les récompenses fournies par l'environnement (0 pour coups non-terminaux, +1/-1 terminaux). Dans les expérimentations, on peut néanmoins introduire le même shaping pour DQN si nécessaire.
+    \item il n'est appliqué qu'aux agents tabulaires : les agents DQN, traitant une représentation spatiale riche, reçoivent par défaut les récompenses fournies par l'environnement (0 pour coups non-terminaux, +1/-1 terminaux). Conformément aux expérimentations présentées dans \texttt{experiments.ipynb}, nous n'avons pas utilisé de shaping pour la plupart des entraînements DQN présentés (les courbes et évaluations publiées correspondent à cette configuration). Il reste toutefois possible d'ajouter le même shaping pour un entraînement DQN alternatif.
 \end{itemize}
 
 
-\section{Resultats expérimentaux}
-L'ensemble de nos procédés et résultats experimentaux sont regroupés dans le fichier \textbf{experiments.ipynb}
+\section{Résultats expérimentaux}
+L'ensemble de nos procédés et résultats expérimentaux sont regroupés dans le fichier \textbf{experiments.ipynb} (répertoire racine du dépôt). Ci-dessous un résumé et quelques corrections apportées après analyse du notebook :
+
+\begin{itemize}
+    \item \textbf{Courbes d'entraînement :} nous traçons les séries de récompenses enregistrées pendant l'entraînement et appliquons un lissage (fenêtre de 50 épisodes) pour rendre les tendances lisibles. Les courbes montrent l'évolution normale pour les entraînements contre \textit{Random} et des chutes de performance lors du passage à un adversaire \textit{Greedy} avant une remontée lorsque l'entraînement devient mixte.
+    \item \textbf{Évaluations vs baselines :} pour comparer les agents, chaque modèle est évalué contre \texttt{RandomAgent} et \texttt{GreedyPathAgent}. Les évaluations présentées dans le notebook utilisent typiquement \texttt{N\\_GAMES = 500} parties pour chaque évaluation, alternant le joueur qui commence.
+    \item \textbf{Matchs agent vs agent :} des tournois directs entre modèles pré-entraînés sont exécutés (paramètre \texttt{N\\_GAMES\_MATCHUP = 200} dans le notebook) pour établir un classement relatif des approches.
+    \item \textbf{Observations principales} (résumées et corrigées selon les résultats réels du notebook) :
+    \begin{itemize}
+        \item Les agents DQN obtiennent globalement de meilleures performances que les agents tabulaires sur des plateaux de taille supérieure ; ils sont aussi plus robustes quand l'espace d'états est large.
+        \item L'entraînement uniquement contre \texttt{Random} donne parfois des agents DQN très diversifiés et performants ; en revanche, un entraînement trop long uniquement contre \texttt{Greedy} peut réduire la capacité du modèle à généraliser (comportement observé dans certaines expériences du notebook).
+        \item Pour les agents tabulaires (Q-Learning, Sarsa), la stratégie de curriculum mixte (Random -> Greedy -> Mix) apparaît comme la plus solide dans nos expérimentations, conduisant souvent à de meilleurs taux de victoire contre les deux baselines.
+        \item Le notebook fournit des comparaisons détaillées (graphiques et tables) et des exemples de parties ; ces éléments ont été utilisés pour corriger et clarifier les affirmations de ce rapport.
+    \end{itemize}
+    \item \textbf{Réplicabilité :} les notebooks et scripts d'entraînement sauvegardent les modèles (dans \texttt{saved\_models/}) et les fichiers JSON de logs qui permettent de reconstruire les figures et évaluations présentées.
+\end{itemize}
+
+Pour plus de détails techniques et figures, voir \texttt{experiments.ipynb} qui contient le code exact des évaluations et les résultats bruts utilisés pour produire ces conclusions.
 
 \end{document}

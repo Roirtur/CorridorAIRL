@@ -110,7 +110,7 @@ def approximation_agent_state_representation(obs: Dict, player: int = 1) -> np.n
     - Walls remaining (player)
     - Walls remaining (opponent)
     
-    Shape: (N, N, 6) flattened to (N*N*6,)
+    Shape: (6, N, N) in PyTorch channels first format
     """    
     N = obs["N"]
     
@@ -145,7 +145,7 @@ def approximation_agent_state_representation(obs: Dict, player: int = 1) -> np.n
     walls_remaining_player.fill(obs["walls_left"][player] / 10.0)
     walls_remaining_opponent.fill(obs["walls_left"][opponent] / 10.0)
     
-    # Stack feature planes (channels-last format)
+    # stack feature planes in PyTorch format
     state = np.stack([
         p1_plane, 
         p2_plane, 
@@ -153,6 +153,6 @@ def approximation_agent_state_representation(obs: Dict, player: int = 1) -> np.n
         v_walls_plane, 
         walls_remaining_player,
         walls_remaining_opponent
-    ], axis=-1)
+    ], axis=0)
     
-    return state.flatten()
+    return state

@@ -32,7 +32,7 @@ class ExperienceReplayPriorized:
         
         samples = [self.replay_buffer[idx] for idx in indices]
         
-        return samples
+        return samples, indices
     
     def update_priorities(self, indices, td_errors):
         for idx, td_error in zip(indices, td_errors):

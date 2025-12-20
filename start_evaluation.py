@@ -2,15 +2,16 @@
 
 import os
 from corridor import Corridor
-from models import QlearningAgent, SarsaAgent, RandomAgent, GreedyPathAgent
-from utils.saving import load_tabular_model
+from models import DQNAgent, QlearningAgent, SarsaAgent, RandomAgent, GreedyPathAgent
+from utils.saving import load_tabular_model, parse_model_info
 
 
 def list_saved_models(directory: str = "saved_models") -> list:
-    """Lists all model files (.pkl) in the specified directory."""
+    """Lists all model files in the specified directory."""
     if not os.path.exists(directory):
         return []
-    files = [f for f in os.listdir(directory) if f.endswith('.pkl')]
+    # Include .pth files for DQN and .pkl for tabular
+    files = [f for f in os.listdir(directory) if f.endswith('.pkl') or f.endswith('.pth')]
     return sorted(files)
 
 
@@ -118,48 +119,71 @@ def load_agent_from_path(path: str, agent_type: str = None):
     Loads an agent from a file path.
     Tries to infer agent type from filename if not provided.
     """
-    from utils.saving import parse_model_info
+    # 1. Parse Info from Filename
+    model_info = parse_model_info(path)
     
-    # Try to infer agent type from filename
+    # 2. Infer Agent Type if needed
     if agent_type is None:
-        model_info = parse_model_info(path)
-        agent_name = model_info['agent_name'].lower()
+        agent_name_lower = model_info['agent_name'].lower()
         
-        if 'qlearn' in agent_name or 'q_learn' in agent_name or 'qagent' in agent_name:
+        if 'dqn' in agent_name_lower:
+            agent_type = 'dqn'
+        elif 'qlearn' in agent_name_lower or 'q_learn' in agent_name_lower or 'qagent' in agent_name_lower:
             agent_type = 'qlearning'
-        elif 'sarsa' in agent_name:
+        elif 'sarsa' in agent_name_lower:
             agent_type = 'sarsa'
         else:
             # Ask user
             print(f"\nCannot infer agent type from filename: {os.path.basename(path)}")
             print("1. Q-Learning")
             print("2. SARSA")
+            print("3. DQN")
             while True:
-                choice = input("Enter agent type (1 or 2): ").strip()
+                choice = input("Enter agent type (1-3): ").strip()
                 if choice == "1":
                     agent_type = 'qlearning'
                     break
                 elif choice == "2":
                     agent_type = 'sarsa'
                     break
+                elif choice == "3":
+                    agent_type = 'dqn'
+                    break
                 print("Invalid choice.")
     
-    # Create agent with training_mode=False
-    if agent_type == 'qlearning':
-        agent_name = f"LoadedQAgent"
-    elif agent_type == 'sarsa':
-        agent_name = f"LoadedSarsaAgent"
+    # 3. Initialize and Load
+    if agent_type == 'dqn':
+        agent_name = f"LoadedDQNAgent"
+        
+        # DQN needs board size to build the network structure
+        board_size = model_info.get('board_size')
+        
+        if board_size is None:
+            print("\nDQN requires board size to initialize the network.")
+            while True:
+                try:
+                    board_size = int(input("Enter board size (e.g. 5, 9): ").strip())
+                    if board_size >= 3:
+                        break
+                except ValueError:
+                    pass
+                print("Invalid board size.")
+        
+        agent = DQNAgent(name=agent_name, board_size=board_size, training_mode=False)
+        agent.load(path) # DQN has its own load method
+        return agent
+
     else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
-    
-    if agent_type == 'qlearning':
-        agent = QlearningAgent(name=agent_name, training_mode=False)
-    elif agent_type == 'sarsa':
-        agent = SarsaAgent(name=agent_name, training_mode=False)
-    
-    # Load the model
-    load_tabular_model(agent, path)
-    return agent
+        # Tabular Agents
+        if agent_type == 'qlearning':
+            agent = QlearningAgent(name="LoadedQAgent", training_mode=False)
+        elif agent_type == 'sarsa':
+            agent = SarsaAgent(name="LoadedSarsaAgent", training_mode=False)
+        else:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+        
+        load_tabular_model(agent, path)
+        return agent
 
 
 def run_evaluation(agent, opponent, env, n_games, starting_policy, n_boards_to_save=0):
@@ -186,7 +210,7 @@ def run_evaluation(agent, opponent, env, n_games, starting_policy, n_boards_to_s
         # Run game
         obs = env.reset()
         steps = 0
-        max_steps = 250
+        max_steps = 100
         
         while steps < max_steps:
             current_player = obs["to_play"]
@@ -295,13 +319,17 @@ def main():
     # 4. Get starting policy
     starting_policy = get_starting_policy()
     
-    # 5. Board size (try to infer from model filename or ask)
-    from utils.saving import parse_model_info
-    model_info = parse_model_info(agent_path)
-    suggested_board_size = model_info.get('board_size')
+    # 5. Board size
+    # Try to reuse the board size from the loaded agent if possible (for DQN specifically)
+    if hasattr(agent, "board_size"):
+        suggested_board_size = agent.board_size
+    else:
+        # Fallback for tabular agents if not explicit
+        model_info = parse_model_info(agent_path)
+        suggested_board_size = model_info.get('board_size')
     
     if suggested_board_size:
-        print(f"\nDetected board size {suggested_board_size} from model filename.")
+        print(f"\nDetected board size {suggested_board_size} from agent/filename.")
         use_detected = input(f"Use board size {suggested_board_size}? (Y/n): ").strip().lower()
         if use_detected in ['', 'y', 'yes']:
             board_size = suggested_board_size
@@ -316,7 +344,7 @@ def main():
                 except ValueError:
                     print("Invalid input. Enter a number.")
     else:
-        print("\nCould not detect board size from model filename.")
+        print("\nCould not detect board size automatically.")
         while True:
             try:
                 board_size = int(input("Enter board size (default 5): ").strip() or "5")

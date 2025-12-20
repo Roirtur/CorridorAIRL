@@ -68,7 +68,7 @@ class QlearningAgent(BaseAgent):
         env: Corridor,
         opponent: BaseAgent, 
         agent_player: int = 1,
-        max_steps: int = 250
+        max_steps: int = 100
     ) -> Dict:
         """
         Runs a single episode for Qlearning agent.
